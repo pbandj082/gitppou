@@ -1,0 +1,23 @@
+{
+  "name": "@gitppou/action",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -p ../core/tsconfig.build.json && tsc -p tsconfig.build.json && ncc build build/index.js -o dist --source-map --license licenses.txt",
+    "check": "tsc -p ../core/tsconfig.build.json && tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "lint": "biome lint src"
+  },
+  "dependencies": {
+    "@actions/core": "^1.11.0",
+    "@actions/exec": "^1.1.1",
+    "@gitppou/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@vercel/ncc": "^0.38.0",
+    "typescript": "^5.0.0",
+    "vitest": "^3.0.0"
+  }
+}

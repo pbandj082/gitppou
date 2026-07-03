@@ -1,0 +1,7 @@
+node_modules/
+packages/core/dist/
+packages/action/build/
+packages/action/dist-types/
+*.tsbuildinfo
+.DS_Store
+coverage/

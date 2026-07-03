@@ -1,0 +1,21 @@
+{
+  "name": "gitppou",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.0.0",
+  "scripts": {
+    "build": "pnpm -r --sort build",
+    "check": "pnpm -r --sort check",
+    "test": "pnpm -r --sort test",
+    "lint": "biome lint .",
+    "format": "prettier --write .",
+    "build:action": "pnpm --filter @gitppou/core build && pnpm --filter @gitppou/action build"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.2",
+    "@types/node": "^22.0.0",
+    "prettier": "^3.0.0",
+    "typescript": "^5.0.0",
+    "vitest": "^3.0.0"
+  }
+}

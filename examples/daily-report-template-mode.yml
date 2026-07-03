@@ -1,0 +1,32 @@
+name: Gitppou Daily Report
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+
+jobs:
+  daily-report:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: your-org/gitppou@v1
+        with:
+          github-username: your-name
+          github-repos: owner/repo
+          backlog-space: your-space
+          backlog-project-keys: APP
+          backlog-user-id: "123456"
+          report-language: en
+          llm-provider: template
+          slack-notify: true
+          commit-report: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BACKLOG_API_KEY: ${{ secrets.BACKLOG_API_KEY }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

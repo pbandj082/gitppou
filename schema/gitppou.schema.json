@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/your-org/gitppou/schema/gitppou.schema.json",
+  "title": "Gitppou configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "github": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "username": { "type": "string" },
+        "repos": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^[^/]+/[^/]+$" }
+        }
+      }
+    },
+    "backlog": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "space": { "type": "string" },
+        "projectKeys": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "userId": { "type": "string" }
+      }
+    },
+    "report": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "language": { "type": "string", "enum": ["en", "ja"] },
+        "timezone": { "type": "string" },
+        "dir": { "type": "string" }
+      }
+    },
+    "llm": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "provider": { "type": "string", "enum": ["template", "github-models"] },
+        "model": { "type": "string" }
+      }
+    },
+    "slack": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "notify": { "type": "boolean" }
+      }
+    },
+    "git": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "commitReport": { "type": "boolean" }
+      }
+    }
+  }
+}
