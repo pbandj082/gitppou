@@ -27,7 +27,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: your-org/gitppou@v1
         with:
@@ -269,6 +269,6 @@ The root `action.yml` runs:
 
 ```yaml
 runs:
-  using: node20
+  using: node24
   main: packages/action/dist/index.js
 ```

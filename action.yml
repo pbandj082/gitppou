@@ -73,5 +73,5 @@ outputs:
     description: "Generated report markdown"
 
 runs:
-  using: "node20"
+  using: "node24"
   main: "packages/action/dist/index.js"
