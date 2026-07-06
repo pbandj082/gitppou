@@ -3,18 +3,43 @@
 Gitppou uses Backlog API key authentication.
 
 ```yaml
-with:
-  backlog-space: your-space
-  backlog-project-keys: APP,WEB
-  backlog-user-id: "123456"
-env:
-  BACKLOG_API_KEY: ${{ secrets.BACKLOG_API_KEY }}
+backlog:
+  # Optional numeric Backlog user id. Omit to use the API key owner.
+  # userId: "123456"
+  spaces:
+    space-a:
+      host: space-a.backlog.jp
+      projectKeys:
+        - APP
+        - WEB
+    space-b:
+      projectKeys:
+        - OPS
 ```
 
-The API base URL is:
+Set `BACKLOG_API_KEY` in the workflow environment from a secret.
+
+`userId` is optional. When omitted, Gitppou calls `/api/v2/users/myself` and uses the numeric `id` returned by Backlog. If you set it explicitly, use that numeric `id`, not the Backlog `userId` handle, Nulab account ID, display name, or space key.
+
+`host` is optional. When omitted, Gitppou uses `{space}.backlog.com`. Set `host` if your Backlog URL uses another host, such as `{space}.backlog.jp`.
+
+For a single Backlog space, still use `backlog.spaces`:
+
+```yaml
+backlog:
+  # userId: "123456"
+  spaces:
+    your-space:
+      host: your-space.backlog.jp
+      projectKeys:
+        - APP
+        - WEB
+```
+
+The default API base URL is:
 
 ```text
-https://{backlog-space}.backlog.com/api/v2
+https://{space}.backlog.com/api/v2
 ```
 
 ## What Gitppou Collects
@@ -22,7 +47,7 @@ https://{backlog-space}.backlog.com/api/v2
 The v1 implementation collects:
 
 - Issues updated on the report date.
-- Issues assigned to `backlog-user-id`.
+- Issues assigned to the configured Backlog user ID.
 - Comments for relevant issues.
 - Status changes when they are available in Backlog comment change logs.
 - Due or overdue assigned issues.
@@ -31,7 +56,7 @@ Backlog data is normalized into the same activity model used by GitHub data, the
 
 ## Project Key Filtering
 
-When `backlog-project-keys` is provided, Gitppou resolves those keys through the Backlog projects API and restricts issue fetching and issue-key detection to those projects.
+When project keys are provided, Gitppou resolves those keys through each Backlog space's projects API and restricts issue fetching and issue-key detection to those projects.
 
 ## Notes
 

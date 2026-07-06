@@ -5,7 +5,7 @@ import { commitReportIfNeeded } from "./git.js";
 
 async function main(): Promise<void> {
   try {
-    const config = readActionConfig();
+    const config = await readActionConfig();
     const result = await generateDailyReport(config);
 
     core.setOutput("report-path", result.reportPath);

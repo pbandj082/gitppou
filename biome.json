@@ -12,7 +12,8 @@
 			"!packages/core/dist",
 			"!packages/action/build",
 			"!packages/action/dist",
-			"!packages/action/dist-types"
+			"!packages/action/dist-types",
+			"!packages/cli/dist"
 		]
 	},
 	"formatter": {

@@ -1,5 +1,13 @@
 node_modules/
+/.env
+/.env.*
+!/.env.example
+/gitppou.local.yml
+/gitppou.local.yaml
+/gitppou.local.json
+/.gitppou/
 packages/core/dist/
+packages/cli/dist/
 packages/action/build/
 packages/action/dist-types/
 *.tsbuildinfo

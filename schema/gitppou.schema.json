@@ -4,34 +4,82 @@
   "title": "Gitppou configuration",
   "type": "object",
   "additionalProperties": false,
+  "required": ["github", "backlog"],
   "properties": {
     "github": {
       "type": "object",
       "additionalProperties": false,
+      "required": ["username"],
       "properties": {
         "username": { "type": "string" },
+        "tokenEnv": { "type": "string" },
+        "tokens": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
         "repos": {
           "type": "array",
-          "items": { "type": "string", "pattern": "^[^/]+/[^/]+$" }
+          "items": {
+            "oneOf": [
+              { "type": "string", "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?/[^/]+$" },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["repo"],
+                "properties": {
+                  "repo": { "type": "string", "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?/[^/]+$" }
+                }
+              },
+              {
+                "type": "object",
+                "minProperties": 1,
+                "maxProperties": 1,
+                "propertyNames": { "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$" },
+                "additionalProperties": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "limit": { "type": "integer", "minimum": 1, "maximum": 100 },
+                    "sort": { "type": "string", "enum": ["created", "updated", "pushed", "full_name"] },
+                    "includeForks": { "type": "boolean" },
+                    "includeArchived": { "type": "boolean" }
+                  }
+                }
+              }
+            ]
+          }
         }
       }
     },
     "backlog": {
       "type": "object",
       "additionalProperties": false,
+      "required": ["spaces"],
       "properties": {
-        "space": { "type": "string" },
-        "projectKeys": {
-          "type": "array",
-          "items": { "type": "string" }
-        },
-        "userId": { "type": "string" }
+        "userId": { "type": "string", "pattern": "^\\d+$" },
+        "spaces": {
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": { "pattern": "^[^/]+$" },
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "host": { "type": "string", "pattern": "^(https?://)?[^/?]+/?$" },
+              "projectKeys": {
+                "type": "array",
+                "items": { "type": "string" }
+              }
+            }
+          }
+        }
       }
     },
     "report": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "date": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
         "language": { "type": "string", "enum": ["en", "ja"] },
         "timezone": { "type": "string" },
         "dir": { "type": "string" }
@@ -42,7 +90,9 @@
       "additionalProperties": false,
       "properties": {
         "provider": { "type": "string", "enum": ["template", "github-models"] },
-        "model": { "type": "string" }
+        "model": { "type": "string" },
+        "maxInputChars": { "type": "integer", "minimum": 1 },
+        "style": { "type": "string", "enum": ["concise", "detailed"] }
       }
     },
     "slack": {

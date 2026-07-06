@@ -1,0 +1,43 @@
+github:
+  username: your-name
+  tokenEnv: GITHUB_TOKEN
+  # Use owner-specific token env vars when repos span private user/org owners.
+  # tokens:
+  #   your-name: GITHUB_TOKEN_PERSONAL
+  #   your-org: GITHUB_TOKEN_YOUR_ORG
+  repos:
+    - owner/repo
+    # Fetch the top 20 recently pushed repositories for an owner.
+    # - your-org:
+    #     limit: 20
+    #     sort: pushed
+
+backlog:
+  # Optional numeric Backlog user id. Omit to use the API key owner.
+  # userId: "123456"
+  spaces:
+    your-space:
+      # Set host when your Backlog URL is not https://your-space.backlog.com.
+      # host: your-space.backlog.jp
+      projectKeys:
+        - APP
+    # other-space:
+    #   projectKeys:
+    #     - OPS
+
+report:
+  language: en
+  timezone: Asia/Tokyo
+  dir: reports
+
+llm:
+  provider: template
+  model: openai/gpt-4o-mini
+  maxInputChars: 20000
+  style: concise
+
+slack:
+  notify: false
+
+git:
+  commitReport: false

@@ -2,6 +2,10 @@ export type {
   ActivityGroup,
   ActivityKind,
   ActivitySource,
+  BacklogSpaceConfig,
+  GitHubRepoOwnerSpec,
+  GitHubRepoSort,
+  GitHubRepoSpec,
   GitppouConfig,
   LlmProviderName,
   LlmStyle,
@@ -28,8 +32,10 @@ export {
   parseReportLanguage,
   resolveReportDate
 } from "./config.js";
+export { buildGitppouConfig } from "./config-file.js";
+export type { ConfigBuildOptions, Env } from "./config-file.js";
 export { fetchBacklogActivities } from "./backlog.js";
-export { fetchGitHubActivities } from "./github.js";
+export { fetchGitHubActivities, parseGitHubRepoSpecString, resolveGitHubTokenForOwner } from "./github.js";
 export { extractIssueKeys, groupActivitiesByIssueKey, normalizeActivities } from "./normalize.js";
 export { buildReportPath, generateDailyReport } from "./report.js";
 export { generateSlackSummary, sendSlackNotification } from "./slack.js";

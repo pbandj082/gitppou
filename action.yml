@@ -7,64 +7,10 @@ branding:
   color: "blue"
 
 inputs:
-  github-repos:
-    description: "Comma-separated repositories to scan, e.g. owner/repo-a,owner/repo-b"
+  config:
+    description: "Path to gitppou YAML or JSON config file"
     required: false
-    default: ""
-  github-username:
-    description: "GitHub username to collect activities for"
-    required: true
-  backlog-space:
-    description: "Backlog space key or domain prefix, e.g. example for example.backlog.com"
-    required: true
-  backlog-project-keys:
-    description: "Comma-separated Backlog project keys, e.g. APP,WEB"
-    required: false
-    default: ""
-  backlog-user-id:
-    description: "Backlog user ID"
-    required: false
-    default: ""
-  report-date:
-    description: "Report date in YYYY-MM-DD. Defaults to today in report-timezone."
-    required: false
-    default: ""
-  report-timezone:
-    description: "Timezone for report date"
-    required: false
-    default: "Asia/Tokyo"
-  report-language:
-    description: "Report language, e.g. en or ja"
-    required: false
-    default: "en"
-  report-dir:
-    description: "Directory to save reports"
-    required: false
-    default: "reports"
-  commit-report:
-    description: "Commit generated report to the repository"
-    required: false
-    default: "false"
-  slack-notify:
-    description: "Send report to Slack"
-    required: false
-    default: "true"
-  llm-provider:
-    description: "LLM provider: template or github-models"
-    required: false
-    default: "template"
-  llm-model:
-    description: "Model name for GitHub Models"
-    required: false
-    default: "openai/gpt-4o-mini"
-  llm-max-input-chars:
-    description: "Maximum number of characters sent to LLM"
-    required: false
-    default: "20000"
-  llm-style:
-    description: "Report style: concise or detailed"
-    required: false
-    default: "concise"
+    default: "gitppou.yml"
 
 outputs:
   report-path:

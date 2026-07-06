@@ -1,16 +1,38 @@
 export type ReportLanguage = "en" | "ja";
 export type LlmProviderName = "template" | "github-models";
 export type LlmStyle = "concise" | "detailed";
+export type GitHubRepoSort = "created" | "updated" | "pushed" | "full_name";
+
+export type GitHubRepoOwnerSpec = {
+  owner: string;
+  limit?: number;
+  sort?: GitHubRepoSort;
+  includeForks?: boolean;
+  includeArchived?: boolean;
+};
+
+export type GitHubRepoSpec =
+  | string
+  | {
+      repo: string;
+    }
+  | GitHubRepoOwnerSpec;
+
+export type BacklogSpaceConfig = {
+  space: string;
+  host?: string;
+  projectKeys: string[];
+};
 
 export type GitppouConfig = {
   githubToken: string;
+  githubTokensByOwner?: Record<string, string>;
   githubUsername: string;
-  githubRepos: string[];
+  githubRepos: GitHubRepoSpec[];
 
   backlogApiKey: string;
-  backlogSpace: string;
-  backlogProjectKeys: string[];
   backlogUserId?: string;
+  backlogSpaces: BacklogSpaceConfig[];
 
   reportDate: string;
   reportTimezone: string;

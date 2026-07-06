@@ -1,5 +1,8 @@
 import { isOnReportDate } from "./config.js";
-import type { GitppouConfig, NormalizedActivity } from "./types.js";
+import type { BacklogSpaceConfig, GitppouConfig, NormalizedActivity } from "./types.js";
+
+type BacklogSpaceContext = BacklogSpaceConfig &
+  Pick<GitppouConfig, "backlogApiKey" | "backlogUserId" | "reportDate" | "reportTimezone">;
 
 type BacklogUser = {
   id: number;
@@ -50,26 +53,55 @@ type BacklogComment = {
 type QueryValue = string | number | boolean | readonly (string | number | boolean)[];
 
 export async function fetchBacklogActivities(config: GitppouConfig): Promise<NormalizedActivity[]> {
-  const projectIds = await resolveProjectIds(config);
-  const issues = await fetchRelevantIssues(config, projectIds);
-  const commentLists = await Promise.all(issues.map((issue) => fetchIssueComments(config, issue.issueKey)));
+  const activitySets = await Promise.all(
+    config.backlogSpaces.map((spaceConfig) =>
+      fetchBacklogSpaceActivities({
+        ...spaceConfig,
+        backlogApiKey: config.backlogApiKey,
+        ...(config.backlogUserId ? { backlogUserId: config.backlogUserId } : {}),
+        reportDate: config.reportDate,
+        reportTimezone: config.reportTimezone
+      })
+    )
+  );
+
+  return activitySets.flat();
+}
+
+async function fetchBacklogSpaceActivities(config: BacklogSpaceContext): Promise<NormalizedActivity[]> {
+  const resolvedConfig = await resolveBacklogUserId(config);
+  const projectIds = await resolveProjectIds(resolvedConfig);
+  const issues = await fetchRelevantIssues(resolvedConfig, projectIds);
+  const commentLists = await Promise.all(issues.map((issue) => fetchIssueComments(resolvedConfig, issue.issueKey)));
 
   return issues.flatMap((issue, index) => {
     const comments = commentLists[index] ?? [];
     return [
-      ...issueToActivities(config, issue),
-      ...commentsToActivities(config, issue, comments)
+      ...issueToActivities(resolvedConfig, issue),
+      ...commentsToActivities(resolvedConfig, issue, comments)
     ];
   });
 }
 
-async function resolveProjectIds(config: GitppouConfig): Promise<number[]> {
-  if (config.backlogProjectKeys.length === 0) {
+async function resolveBacklogUserId(config: BacklogSpaceContext): Promise<BacklogSpaceContext> {
+  if (config.backlogUserId) {
+    return config;
+  }
+
+  const user = await backlogGet<BacklogUser>(config, "/users/myself", {});
+  return {
+    ...config,
+    backlogUserId: String(user.id)
+  };
+}
+
+async function resolveProjectIds(config: BacklogSpaceContext): Promise<number[]> {
+  if (config.projectKeys.length === 0) {
     return [];
   }
 
   const projects = await backlogGet<BacklogProject[]>(config, "/projects", {});
-  const wanted = new Set(config.backlogProjectKeys.map((key) => key.toUpperCase()));
+  const wanted = new Set(config.projectKeys.map((key) => key.toUpperCase()));
   const projectIds = projects
     .filter((project) => wanted.has(project.projectKey.toUpperCase()))
     .map((project) => project.id);
@@ -79,13 +111,13 @@ async function resolveProjectIds(config: GitppouConfig): Promise<number[]> {
   );
 
   if (missing.length > 0) {
-    throw new Error(`Backlog project key not found: ${missing.join(", ")}`);
+    throw new Error(`Backlog project key not found in ${config.space}: ${missing.join(", ")}`);
   }
 
   return projectIds;
 }
 
-async function fetchRelevantIssues(config: GitppouConfig, projectIds: number[]): Promise<BacklogIssue[]> {
+async function fetchRelevantIssues(config: BacklogSpaceContext, projectIds: number[]): Promise<BacklogIssue[]> {
   const commonParams: Record<string, QueryValue> = {
     count: 100,
     sort: "updated",
@@ -117,18 +149,19 @@ async function fetchRelevantIssues(config: GitppouConfig, projectIds: number[]):
   return [...issues.values()];
 }
 
-async function fetchIssueComments(config: GitppouConfig, issueKey: string): Promise<BacklogComment[]> {
+async function fetchIssueComments(config: BacklogSpaceContext, issueKey: string): Promise<BacklogComment[]> {
   return backlogGet<BacklogComment[]>(config, `/issues/${encodeURIComponent(issueKey)}/comments`, {
     count: 100,
     order: "asc"
   });
 }
 
-function issueToActivities(config: GitppouConfig, issue: BacklogIssue): NormalizedActivity[] {
+function issueToActivities(config: BacklogSpaceContext, issue: BacklogIssue): NormalizedActivity[] {
   const activities: NormalizedActivity[] = [];
   const projectKey = getProjectKey(issue.issueKey);
   const metadata = compactMetadata({
     backlogIssueId: issue.id,
+    backlogSpace: config.space,
     status: issue.status?.name,
     priority: issue.priority?.name,
     assignee: issue.assignee?.name,
@@ -143,7 +176,7 @@ function issueToActivities(config: GitppouConfig, issue: BacklogIssue): Normaliz
       issueKey: issue.issueKey,
       title: `${issue.issueKey} ${issue.summary}`,
       ...(issue.description ? { body: issue.description } : {}),
-      url: buildIssueUrl(config.backlogSpace, issue.issueKey),
+      url: buildIssueUrl(config, issue.issueKey),
       ...(issue.created ? { createdAt: issue.created } : {}),
       ...(issue.updated ? { updatedAt: issue.updated } : {}),
       metadata
@@ -157,7 +190,7 @@ function issueToActivities(config: GitppouConfig, issue: BacklogIssue): Normaliz
       projectKey,
       issueKey: issue.issueKey,
       title: `${issue.issueKey} due: ${issue.summary}`,
-      url: buildIssueUrl(config.backlogSpace, issue.issueKey),
+      url: buildIssueUrl(config, issue.issueKey),
       ...(issue.updated ? { updatedAt: issue.updated } : {}),
       metadata
     });
@@ -167,7 +200,7 @@ function issueToActivities(config: GitppouConfig, issue: BacklogIssue): Normaliz
 }
 
 function commentsToActivities(
-  config: GitppouConfig,
+  config: BacklogSpaceContext,
   issue: BacklogIssue,
   comments: BacklogComment[]
 ): NormalizedActivity[] {
@@ -183,10 +216,11 @@ function commentsToActivities(
       continue;
     }
 
-    const url = `${buildIssueUrl(config.backlogSpace, issue.issueKey)}#comment-${comment.id}`;
+    const url = `${buildIssueUrl(config, issue.issueKey)}#comment-${comment.id}`;
     const metadata = compactMetadata({
       backlogIssueId: issue.id,
       backlogCommentId: comment.id,
+      backlogSpace: config.space,
       author: comment.createdUser?.name
     });
 
@@ -233,11 +267,12 @@ function commentsToActivities(
 }
 
 async function backlogGet<T>(
-  config: GitppouConfig,
+  config: BacklogSpaceContext,
   path: string,
   params: Record<string, QueryValue>
 ): Promise<T> {
-  const url = new URL(`https://${config.backlogSpace}.backlog.com/api/v2${path}`);
+  const host = backlogHost(config);
+  const url = new URL(`https://${host}/api/v2${path}`);
   url.searchParams.set("apiKey", config.backlogApiKey);
 
   for (const [key, value] of Object.entries(params)) {
@@ -259,18 +294,56 @@ async function backlogGet<T>(
   });
 
   if (!response.ok) {
-    throw new Error(`Backlog API request failed for ${path} with status ${response.status}.`);
+    throw new Error(await backlogErrorMessage(config, host, path, response));
   }
 
   return (await response.json()) as T;
 }
 
-function isAssignedToUser(config: GitppouConfig, issue: BacklogIssue): boolean {
+function isAssignedToUser(config: BacklogSpaceContext, issue: BacklogIssue): boolean {
   return Boolean(config.backlogUserId && String(issue.assignee?.id) === config.backlogUserId);
 }
 
-function buildIssueUrl(space: string, issueKey: string): string {
-  return `https://${space}.backlog.com/view/${issueKey}`;
+function backlogHost(config: BacklogSpaceContext): string {
+  return config.host?.trim() || `${config.space}.backlog.com`;
+}
+
+async function backlogErrorMessage(
+  config: BacklogSpaceContext,
+  host: string,
+  path: string,
+  response: Response
+): Promise<string> {
+  const details = compactResponseBody(await safeResponseText(response));
+  const hostHint = host.endsWith(".backlog.com")
+    ? ` If this space uses backlog.jp or another Backlog host, set backlog.spaces.${config.space}.host.`
+    : "";
+  const assigneeHint = /assigneeId/i.test(details)
+    ? " Check backlog.userId. It must be the numeric Backlog user id for this space; omit backlog.userId to use the API key owner from /users/myself."
+    : "";
+
+  return [
+    `Backlog API request failed for https://${host}/api/v2${path} with status ${response.status}.`,
+    details ? `Response: ${details}.` : "",
+    hostHint,
+    assigneeHint
+  ].filter(Boolean).join(" ");
+}
+
+async function safeResponseText(response: Response): Promise<string> {
+  try {
+    return await response.text();
+  } catch {
+    return "";
+  }
+}
+
+function compactResponseBody(value: string): string {
+  return value.replace(/\s+/g, " ").trim().slice(0, 300);
+}
+
+function buildIssueUrl(config: BacklogSpaceContext, issueKey: string): string {
+  return `https://${backlogHost(config)}/view/${issueKey}`;
 }
 
 function getProjectKey(issueKey: string): string {

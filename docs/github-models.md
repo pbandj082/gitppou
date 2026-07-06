@@ -5,22 +5,24 @@ GitHub Models mode is optional. Template mode is the default.
 ```yaml
 permissions:
   models: read
+```
 
-with:
-  llm-provider: github-models
-  llm-model: openai/gpt-4o-mini
+```yaml
+llm:
+  provider: github-models
+  model: openai/gpt-4o-mini
 ```
 
 Gitppou uses the GitHub Models chat completions API with the workflow `GITHUB_TOKEN`.
 
 ## Data Sent to GitHub Models
 
-When `llm-provider` is `github-models`, Gitppou sends:
+When `llm.provider` is `github-models`, Gitppou sends:
 
 - The fact-based template report.
 - Normalized GitHub and Backlog activity data.
 
-The data is capped by `llm-max-input-chars`.
+The data is capped by `llm.maxInputChars`.
 
 ## Safety Rules
 

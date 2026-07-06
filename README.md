@@ -4,7 +4,7 @@ Gitppou generates engineer daily reports from GitHub activity and Backlog progre
 
 The name means **Git + nippou**. `nippou` means daily report in Japanese.
 
-Gitppou is a GitHub Action MVP. It is not a web service, does not use a database, and does not provide a web UI.
+Gitppou is a GitHub Action with a local preview CLI. It is not a web service, does not use a database, and does not provide a web UI.
 
 ## Quick Start
 
@@ -31,22 +31,44 @@ jobs:
 
       - uses: your-org/gitppou@v1
         with:
-          github-username: your-name
-          github-repos: owner/repo
-          backlog-space: your-space
-          backlog-project-keys: APP
-          backlog-user-id: "123456"
-          report-language: en
-          report-timezone: Asia/Tokyo
-          report-dir: reports
-          llm-provider: github-models
-          llm-model: openai/gpt-4o-mini
-          commit-report: true
-          slack-notify: true
+          config: gitppou.yml
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           BACKLOG_API_KEY: ${{ secrets.BACKLOG_API_KEY }}
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+```
+
+Create `gitppou.yml` in the repository:
+
+```yaml
+github:
+  username: your-name
+  repos:
+    - owner/repo
+
+backlog:
+  # Optional numeric Backlog user id. Omit to use the API key owner.
+  # userId: "123456"
+  spaces:
+    your-space:
+      # host: your-space.backlog.jp
+      projectKeys:
+        - APP
+
+report:
+  language: en
+  timezone: Asia/Tokyo
+  dir: reports
+
+llm:
+  provider: github-models
+  model: openai/gpt-4o-mini
+
+slack:
+  notify: true
+
+git:
+  commitReport: true
 ```
 
 The generated report path is:
@@ -92,32 +114,42 @@ permissions:
   models: read
 ```
 
-If you need to scan multiple private repositories, use a fine-grained personal access token with the minimum required permissions:
+If you need to scan private repositories outside the workflow repository, use a fine-grained personal access token with the minimum required permissions:
 
 ```yaml
 env:
   GITHUB_TOKEN: ${{ secrets.REPORT_GITHUB_TOKEN }}
 ```
 
+If repositories span multiple private users or organizations, provide owner-specific token environment variables:
+
+```yaml
+github:
+  username: your-name
+  tokenEnv: GITHUB_TOKEN
+  tokens:
+    your-name: GITHUB_TOKEN_PERSONAL
+    org-a: GITHUB_TOKEN_ORG_A
+    org-b: GITHUB_TOKEN_ORG_B
+  repos:
+    - your-name/private-repo
+    - org-a/app
+    - org-b/api
+```
+
+```yaml
+env:
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  GITHUB_TOKEN_PERSONAL: ${{ secrets.REPORT_GITHUB_TOKEN_PERSONAL }}
+  GITHUB_TOKEN_ORG_A: ${{ secrets.REPORT_GITHUB_TOKEN_ORG_A }}
+  GITHUB_TOKEN_ORG_B: ${{ secrets.REPORT_GITHUB_TOKEN_ORG_B }}
+```
+
 ## Inputs
 
 | Input | Default | Description |
 | --- | --- | --- |
-| `github-repos` | `""` | Comma-separated repositories to scan, such as `owner/repo-a,owner/repo-b`. |
-| `github-username` | Required | GitHub username to collect activity for. |
-| `backlog-space` | Required | Backlog space key or domain prefix, such as `example` for `example.backlog.com`. |
-| `backlog-project-keys` | `""` | Comma-separated Backlog project keys, such as `APP,WEB`. |
-| `backlog-user-id` | `""` | Backlog user ID. |
-| `report-date` | Today in `report-timezone` | Report date in `YYYY-MM-DD`. |
-| `report-timezone` | `Asia/Tokyo` | Timezone used to resolve the default report date. |
-| `report-language` | `en` | Report language. Supported values: `en`, `ja`. |
-| `report-dir` | `reports` | Directory to save Markdown reports. |
-| `commit-report` | `false` | Commit the generated report to the repository. |
-| `slack-notify` | `true` | Send a Slack Incoming Webhook notification. |
-| `llm-provider` | `template` | `template` or `github-models`. |
-| `llm-model` | `openai/gpt-4o-mini` | Model ID for GitHub Models. |
-| `llm-max-input-chars` | `20000` | Maximum normalized activity characters sent to the LLM. |
-| `llm-style` | `concise` | `concise` or `detailed`. |
+| `config` | `gitppou.yml` | Path to the Gitppou YAML or JSON config file. Run `actions/checkout` before this action. |
 
 ## Environment Variables
 
@@ -125,7 +157,8 @@ Secrets must be passed via `env`, not `with`.
 
 | Variable | Required | Description |
 | --- | --- | --- |
-| `GITHUB_TOKEN` | Yes | GitHub token used for activity collection and GitHub Models. |
+| Default GitHub token env var | Yes | Environment variable named by `github.tokenEnv`; `GITHUB_TOKEN` by default. Used for activity collection fallback and GitHub Models. |
+| Owner-specific GitHub token env vars | Only for mapped owners | Additional tokens referenced by `github.tokens`. |
 | `BACKLOG_API_KEY` | Yes | Backlog API key. |
 | `SLACK_WEBHOOK_URL` | Only for Slack | Slack Incoming Webhook URL. |
 
@@ -136,23 +169,64 @@ Do not hard-code these values. Store them in GitHub Actions Secrets.
 Template mode is the default:
 
 ```yaml
-with:
-  llm-provider: template
+llm:
+  provider: template
 ```
 
 Template mode does not send activity data to an external LLM. It creates a fact-based Markdown report directly from normalized GitHub and Backlog activity.
+
+## Local Preview
+
+Use the CLI to generate a report locally before running the GitHub Action.
+
+```sh
+pnpm preview -- --env-file .env --date 2026-07-06 --print
+```
+
+The preview command reads `gitppou.local.yml`, `gitppou.local.yaml`, or `gitppou.local.json` first, then falls back to `gitppou.yml`, `gitppou.yaml`, or `gitppou.json`. `gitppou.local.yml` and `.gitppou/` are ignored for local customization and generated preview reports. It always disables committing reports, and skips Slack notifications unless `--slack` is passed.
+
+Use `.env.example` as a reference for local credentials. Existing shell environment variables take precedence over values from `--env-file`.
+
+Local config can mix explicit repositories and owner selectors:
+
+```yaml
+github:
+  repos:
+    - owner/repo
+    - org-a:
+        limit: 20
+        sort: pushed
+```
+
+Owner selectors scan up to `limit` repositories sorted by `pushed` by default. Archived, disabled, and fork repositories are skipped unless explicitly included.
+
+Local config collects from Backlog spaces:
+
+```yaml
+backlog:
+  # Optional numeric Backlog user id. Omit to use the API key owner.
+  # userId: "123456"
+  spaces:
+    space-a:
+      # host: space-a.backlog.jp
+      projectKeys:
+        - APP
+    space-b:
+      projectKeys:
+        - OPS
+```
 
 ## GitHub Models Mode
 
 GitHub Models mode is opt-in:
 
 ```yaml
-with:
-  llm-provider: github-models
-  llm-model: openai/gpt-4o-mini
+llm:
+  provider: github-models
+  model: openai/gpt-4o-mini
 ```
 
-When `llm-provider` is set to `github-models`, Gitppou sends normalized GitHub and Backlog activity data to GitHub Models for report generation. Gitppou first creates a fact-based template report, then asks GitHub Models to refine that report without inventing unsupported work.
+When `llm.provider` is set to `github-models`, Gitppou sends normalized GitHub and Backlog activity data to GitHub Models for report generation. Gitppou first creates a fact-based template report, then asks GitHub Models to refine that report without inventing unsupported work.
 
 GitHub Models can be used with a free, rate-limited quota available to GitHub accounts. For production or higher-volume use, users may need to enable paid GitHub Models usage. GitHub Models billing is separate from GitHub Copilot billing.
 
@@ -163,15 +237,15 @@ If GitHub Models fails, Gitppou logs a warning and falls back to the template re
 English is the default:
 
 ```yaml
-with:
-  report-language: en
+report:
+  language: en
 ```
 
 Japanese reports are supported:
 
 ```yaml
-with:
-  report-language: ja
+report:
+  language: ja
 ```
 
 Documentation, examples, code comments, and default generated reports use English as the base language.
@@ -194,15 +268,15 @@ Issue keys use this pattern:
 /[A-Z][A-Z0-9_]+-\d+/g
 ```
 
-When `backlog-project-keys` is set, detected issue keys are restricted to those projects.
+When `backlog.spaces.*.projectKeys` is set, detected issue keys are restricted to those projects.
 
 ## Slack Notifications
 
 Gitppou posts a concise summary to Slack via Incoming Webhook when:
 
 ```yaml
-with:
-  slack-notify: true
+slack:
+  notify: true
 env:
   SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
 ```
@@ -211,14 +285,14 @@ Slack receives a summary, not the full raw activity. Slack failures are warnings
 
 ## Commit Behavior
 
-When `commit-report: true`, Gitppou:
+When `git.commitReport: true`, Gitppou:
 
 1. Configures git user as `gitppou[bot]`.
 2. Adds the generated report file.
 3. Commits with `Add daily report YYYY-MM-DD`.
 4. Pushes the branch.
 
-If there are no report changes, the commit is skipped. If commit or push fails while `commit-report: true`, the action fails.
+If there are no report changes, the commit is skipped. If commit or push fails while `git.commitReport: true`, the action fails.
 
 Committing reports to public repositories is not recommended. Private repositories are recommended for storing daily reports.
 
@@ -242,15 +316,49 @@ See:
 
 `Backlog project key not found`
 
-Check `backlog-space` and `backlog-project-keys`. The project key must exist in the configured Backlog space.
+Check `backlog.spaces` and project key settings. The project key must exist in the configured Backlog space.
+
+`config.github.repos[n] must be one of...`
+
+Check owner selector indentation. Options must be nested under the owner key:
+
+```yaml
+github:
+  repos:
+    - owner/repo
+    - your-org:
+        limit: 20
+        sort: pushed
+```
+
+`GitHub owner selector "..."`
+
+Use the owner login from the repository URL. GitHub owner names use letters, numbers, and hyphens; underscores are not valid owner names.
 
 `Resource not accessible by integration`
 
 Check workflow `permissions`. For private repositories, the default `GITHUB_TOKEN` may only access the current repository.
 
+`Backlog API request failed for ... /projects ...`
+
+Check the Backlog host. Gitppou defaults to `{space}.backlog.com`; if your space uses another host, set it explicitly:
+
+```yaml
+backlog:
+  spaces:
+    your-space:
+      host: your-space.backlog.jp
+      projectKeys:
+        - APP
+```
+
+`error.invalid : assigneeId[0]`
+
+Check `backlog.userId`. It must be the numeric Backlog user id for the space, not the Backlog `userId` handle, Nulab account ID, display name, or space key. Usually, omit `backlog.userId`; Gitppou will call `/api/v2/users/myself` and use the API key owner's numeric id.
+
 `GitHub Models request failed`
 
-Check `permissions.models: read`, the selected `llm-model`, and whether GitHub Models is enabled for the account or organization. Gitppou will still generate the template report.
+Check `permissions.models: read`, the selected `llm.model`, and whether GitHub Models is enabled for the account or organization. Gitppou will still generate the template report.
 
 `Slack webhook request failed`
 

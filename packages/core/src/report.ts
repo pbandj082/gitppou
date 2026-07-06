@@ -5,14 +5,12 @@ import { fetchGitHubActivities } from "./github.js";
 import { applyTemplateProvider, generateTemplateReport, refineWithGitHubModels } from "./llm/index.js";
 import { groupActivitiesByIssueKey, normalizeActivities } from "./normalize.js";
 import { generateSlackSummary, sendSlackNotification } from "./slack.js";
-import type { GitppouConfig, ReportResult } from "./types.js";
+import type { GitppouConfig, NormalizedActivity, ReportResult } from "./types.js";
 
 export async function generateDailyReport(config: GitppouConfig): Promise<ReportResult> {
-  const [githubActivities, backlogActivities] = await Promise.all([
-    fetchGitHubActivities(config),
-    fetchBacklogActivities(config)
-  ]);
-  const activities = normalizeActivities([...githubActivities, ...backlogActivities], config.backlogProjectKeys);
+  const [githubActivities, backlogActivities] = await fetchActivities(config);
+  const backlogProjectKeys = config.backlogSpaces.flatMap((space) => space.projectKeys);
+  const activities = normalizeActivities([...githubActivities, ...backlogActivities], backlogProjectKeys);
   const groups = groupActivitiesByIssueKey(activities);
   const templateDraft = generateTemplateReport({ config, activities, groups });
   let reportMarkdown = applyTemplateProvider(templateDraft);
@@ -46,6 +44,32 @@ export async function generateDailyReport(config: GitppouConfig): Promise<Report
     reportMarkdown,
     slackSummary
   };
+}
+
+async function fetchActivities(config: GitppouConfig): Promise<[NormalizedActivity[], NormalizedActivity[]]> {
+  const [githubResult, backlogResult] = await Promise.allSettled([
+    fetchGitHubActivities(config),
+    fetchBacklogActivities(config)
+  ]);
+
+  if (githubResult.status === "rejected" || backlogResult.status === "rejected") {
+    const failures = [
+      rejectedReason("GitHub", githubResult),
+      rejectedReason("Backlog", backlogResult)
+    ].filter((failure): failure is string => Boolean(failure));
+
+    throw new Error(`Activity fetch failed:\n${failures.map((failure) => `- ${failure}`).join("\n")}`);
+  }
+
+  return [githubResult.value, backlogResult.value];
+}
+
+function rejectedReason(label: string, result: PromiseSettledResult<NormalizedActivity[]>): string | undefined {
+  if (result.status === "fulfilled") {
+    return undefined;
+  }
+
+  return `${label}: ${formatError(result.reason)}`;
 }
 
 export function buildReportPath(reportDir: string, reportDate: string): string {

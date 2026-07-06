@@ -3,8 +3,8 @@
 Gitppou supports Slack Incoming Webhooks.
 
 ```yaml
-with:
-  slack-notify: true
+slack:
+  notify: true
 env:
   SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
 ```

@@ -1,6 +1,6 @@
 import { Octokit } from "@octokit/rest";
 import { getReportDateRange, isOnReportDate } from "./config.js";
-import type { GitppouConfig, NormalizedActivity } from "./types.js";
+import type { GitHubRepoOwnerSpec, GitHubRepoSort, GitHubRepoSpec, GitppouConfig, NormalizedActivity } from "./types.js";
 
 type RepoRef = {
   owner: string;
@@ -8,19 +8,198 @@ type RepoRef = {
   fullName: string;
 };
 
+const DEFAULT_REPO_SELECTOR_LIMIT = 20;
+const MAX_REPO_SELECTOR_LIMIT = 100;
+const DEFAULT_REPO_SELECTOR_SORT: GitHubRepoSort = "pushed";
+const REPO_SELECTOR_SORTS = new Set<GitHubRepoSort>(["created", "updated", "pushed", "full_name"]);
+const GITHUB_OWNER_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/;
+
 export async function fetchGitHubActivities(config: GitppouConfig): Promise<NormalizedActivity[]> {
   if (config.githubRepos.length === 0) {
     return [];
   }
 
-  const octokit = new Octokit({
-    auth: config.githubToken,
-    userAgent: "gitppou"
-  });
-  const repos = config.githubRepos.map(parseRepo);
-  const activities = await Promise.all(repos.map((repo) => fetchRepoActivities(octokit, repo, config)));
+  const octokitsByOwner = new Map<string, Octokit>();
+  const repos = await resolveRepoSpecs(config, octokitsByOwner);
+  const activities = await Promise.all(
+    repos.map((repo) => fetchRepoActivities(octokitForOwner(octokitsByOwner, config, repo.owner), repo, config))
+  );
 
   return activities.flat();
+}
+
+export function parseGitHubRepoSpecString(value: string): GitHubRepoSpec {
+  const trimmed = value.trim();
+  if (!trimmed.includes(":")) {
+    return trimmed;
+  }
+
+  const [owner, limitOrSort, sort, ...rest] = trimmed.split(":");
+  if (!owner) {
+    throw new Error(`Invalid github-repos entry "${value}". Use owner/repo or owner[:limit[:sort]].`);
+  }
+  assertValidGitHubOwner(owner, `github.repos owner selector "${owner}"`);
+
+  if (rest.length > 0) {
+    throw new Error(`Invalid github-repos entry "${value}". Use owner/repo or owner[:limit[:sort]].`);
+  }
+
+  const spec: GitHubRepoOwnerSpec = {
+    owner
+  };
+
+  if (limitOrSort) {
+    if (!sort && REPO_SELECTOR_SORTS.has(limitOrSort as GitHubRepoSort)) {
+      spec.sort = limitOrSort as GitHubRepoSort;
+    } else {
+      spec.limit = parseRepoSelectorLimit(limitOrSort);
+    }
+  }
+
+  if (sort) {
+    spec.sort = parseRepoSelectorSort(sort);
+  }
+
+  return spec;
+}
+
+export function resolveGitHubTokenForOwner(config: GitppouConfig, owner: string): string {
+  const normalizedOwner = owner.toLowerCase();
+  const ownerToken = Object.entries(config.githubTokensByOwner ?? {}).find(
+    ([tokenOwner]) => tokenOwner.toLowerCase() === normalizedOwner
+  )?.[1];
+
+  return ownerToken?.trim() || config.githubToken;
+}
+
+function octokitForOwner(cache: Map<string, Octokit>, config: GitppouConfig, owner: string): Octokit {
+  const normalizedOwner = owner.toLowerCase();
+  const cached = cache.get(normalizedOwner);
+  if (cached) {
+    return cached;
+  }
+
+  const octokit = new Octokit({
+    auth: resolveGitHubTokenForOwner(config, owner),
+    userAgent: "gitppou"
+  });
+  cache.set(normalizedOwner, octokit);
+
+  return octokit;
+}
+
+async function resolveRepoSpecs(config: GitppouConfig, octokitsByOwner: Map<string, Octokit>): Promise<RepoRef[]> {
+  const refs = (
+    await Promise.all(
+      config.githubRepos.map((spec) => resolveRepoSpec(config, octokitsByOwner, spec))
+    )
+  ).flat();
+  const seen = new Set<string>();
+  const deduped: RepoRef[] = [];
+
+  for (const repo of refs) {
+    const key = repo.fullName.toLowerCase();
+    if (!seen.has(key)) {
+      seen.add(key);
+      deduped.push(repo);
+    }
+  }
+
+  return deduped;
+}
+
+async function resolveRepoSpec(
+  config: GitppouConfig,
+  octokitsByOwner: Map<string, Octokit>,
+  spec: GitHubRepoSpec
+): Promise<RepoRef[]> {
+  if (typeof spec === "string") {
+    return [parseRepo(spec)];
+  }
+
+  if ("repo" in spec) {
+    return [parseRepo(spec.repo)];
+  }
+
+  return fetchSelectedOwnerRepos(config, octokitsByOwner, spec);
+}
+
+async function fetchSelectedOwnerRepos(
+  config: GitppouConfig,
+  octokitsByOwner: Map<string, Octokit>,
+  spec: GitHubRepoOwnerSpec
+): Promise<RepoRef[]> {
+  const owner = spec.owner.trim();
+  if (!owner) {
+    throw new Error("github.repos owner selector is required.");
+  }
+  assertValidGitHubOwner(owner, `github.repos owner selector "${owner}"`);
+
+  const octokit = octokitForOwner(octokitsByOwner, config, owner);
+  const limit = validateRepoSelectorLimit(spec.limit ?? DEFAULT_REPO_SELECTOR_LIMIT);
+  const sort = spec.sort ?? DEFAULT_REPO_SELECTOR_SORT;
+  const repositories = await listOwnerRepos(octokit, owner, sort);
+
+  return repositories
+    .filter((repo) => spec.includeForks || !repo.fork)
+    .filter((repo) => spec.includeArchived || !repo.archived)
+    .filter((repo) => !repo.disabled)
+    .slice(0, limit)
+    .map((repo) => parseRepo(repo.full_name));
+}
+
+async function listOwnerRepos(octokit: Octokit, owner: string, sort: GitHubRepoSort) {
+  try {
+    return await octokit.paginate(octokit.repos.listForOrg, {
+      org: owner,
+      type: "all",
+      sort,
+      direction: "desc",
+      per_page: 100
+    });
+  } catch (error) {
+    if (!isNotFoundError(error)) {
+      throw error;
+    }
+  }
+
+  const authenticatedUser = await getAuthenticatedUserLogin(octokit);
+  if (authenticatedUser.toLowerCase() === owner.toLowerCase()) {
+    return octokit.paginate(octokit.repos.listForAuthenticatedUser, {
+      visibility: "all",
+      affiliation: "owner",
+      sort,
+      direction: "desc",
+      per_page: 100
+    });
+  }
+
+  try {
+    return await octokit.paginate(octokit.repos.listForUser, {
+      username: owner,
+      type: "owner",
+      sort,
+      direction: "desc",
+      per_page: 100
+    });
+  } catch (error) {
+    if (isNotFoundError(error)) {
+      throw new Error(
+        `GitHub owner selector "${owner}" was not found as an organization or user. Use the owner login from the repository URL, or configure github.tokens.${owner} with a token that can access it.`
+      );
+    }
+
+    throw error;
+  }
+}
+
+async function getAuthenticatedUserLogin(octokit: Octokit): Promise<string> {
+  const response = await octokit.users.getAuthenticated();
+  return response.data.login;
+}
+
+function isNotFoundError(error: unknown): boolean {
+  return typeof error === "object" && error !== null && "status" in error && error.status === 404;
 }
 
 function parseRepo(value: string): RepoRef {
@@ -29,8 +208,41 @@ function parseRepo(value: string): RepoRef {
   if (!owner || !repo) {
     throw new Error(`Invalid github-repos entry "${value}". Use owner/repo.`);
   }
+  assertValidGitHubOwner(owner, `github.repos owner "${owner}"`);
 
   return { owner, repo, fullName: `${owner}/${repo}` };
+}
+
+function assertValidGitHubOwner(owner: string, label: string): void {
+  if (!GITHUB_OWNER_PATTERN.test(owner)) {
+    throw new Error(
+      `${label} must be a GitHub user or organization login. GitHub owner names can contain letters, numbers, and hyphens, but not underscores.`
+    );
+  }
+}
+
+function validateRepoSelectorLimit(value: number): number {
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new Error("github.repos owner selector limit must be a positive integer.");
+  }
+
+  if (value > MAX_REPO_SELECTOR_LIMIT) {
+    throw new Error(`github.repos owner selector limit must be less than or equal to ${MAX_REPO_SELECTOR_LIMIT}.`);
+  }
+
+  return value;
+}
+
+function parseRepoSelectorLimit(value: string): number {
+  return validateRepoSelectorLimit(Number(value));
+}
+
+function parseRepoSelectorSort(value: string): GitHubRepoSort {
+  if (REPO_SELECTOR_SORTS.has(value as GitHubRepoSort)) {
+    return value as GitHubRepoSort;
+  }
+
+  throw new Error(`Unsupported repository selector sort "${value}". Supported values are created, updated, pushed, and full_name.`);
 }
 
 async function fetchRepoActivities(

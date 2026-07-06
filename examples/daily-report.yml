@@ -18,18 +18,12 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      # Set llm.provider: github-models in gitppou.yml to use GitHub Models.
       - uses: your-org/gitppou@v1
         with:
-          github-username: your-name
-          github-repos: owner/repo
-          backlog-space: your-space
-          backlog-project-keys: APP
-          backlog-user-id: "123456"
-          report-language: en
-          llm-provider: github-models
-          slack-notify: true
-          commit-report: false
+          config: gitppou.yml
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # GITHUB_TOKEN_OWNER: ${{ secrets.REPORT_GITHUB_TOKEN_OWNER }}
           BACKLOG_API_KEY: ${{ secrets.BACKLOG_API_KEY }}
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

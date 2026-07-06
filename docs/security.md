@@ -29,4 +29,4 @@ Reports may contain:
 
 Template mode does not send activity data to an external LLM.
 
-When `llm-provider` is set to `github-models`, normalized GitHub and Backlog activity data is sent to GitHub Models. Limit the amount of data sent with `llm-max-input-chars`.
+When `llm.provider` is set to `github-models`, normalized GitHub and Backlog activity data is sent to GitHub Models. Limit the amount of data sent with `llm.maxInputChars`.
