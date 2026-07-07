@@ -36485,6 +36485,10 @@ function buildGitppouConfig(rawConfig, options, env, now = new Date()) {
             config.slackWebhookUrl = slackWebhookUrl;
         }
     }
+    const githubActionsContext = resolveGitHubActionsContext(env);
+    if (githubActionsContext) {
+        config.githubActionsContext = githubActionsContext;
+    }
     return config;
 }
 function getSection(root, key) {
@@ -36493,6 +36497,19 @@ function getSection(root, key) {
         return {};
     }
     return asObject(value, `config.${key}`);
+}
+function resolveGitHubActionsContext(env) {
+    const context = compactObject({
+        actor: env.GITHUB_ACTOR?.trim(),
+        eventName: env.GITHUB_EVENT_NAME?.trim(),
+        refName: env.GITHUB_REF_NAME?.trim(),
+        repository: env.GITHUB_REPOSITORY?.trim(),
+        runId: env.GITHUB_RUN_ID?.trim(),
+        runNumber: env.GITHUB_RUN_NUMBER?.trim(),
+        serverUrl: env.GITHUB_SERVER_URL?.trim(),
+        workflow: env.GITHUB_WORKFLOW?.trim()
+    });
+    return Object.keys(context).length > 0 ? context : undefined;
 }
 function asObject(value, pathLabel) {
     if (isObject(value)) {
@@ -36722,6 +36739,9 @@ function getStringRecord(section, key, pathLabel) {
 function resolveGitHubTokensByOwner(github, env) {
     const tokenEnvByOwner = getStringRecord(github, "tokens", "config.github.tokens");
     return Object.fromEntries(Object.entries(tokenEnvByOwner).map(([owner, envName]) => [owner, requiredEnv(env, envName)]));
+}
+function compactObject(value) {
+    return Object.fromEntries(Object.entries(value).filter((entry) => typeof entry[1] === "string" && entry[1] !== ""));
 }
 function requiredEnv(env, name) {
     const value = env[name]?.trim();
@@ -42705,7 +42725,9 @@ function generateSlackSummary(config, groups, reportPath) {
     const title = isJapanese ? `日報 ${config.reportDate}` : `Daily Report - ${config.reportDate}`;
     const workLabel = isJapanese ? "本日対応:" : "Work:";
     const blockerLabel = isJapanese ? "課題・相談:" : "Blockers / Questions:";
+    const runLabel = isJapanese ? "実行:" : "Run:";
     const detailsLabel = isJapanese ? "詳細:" : "Details:";
+    const runLines = githubActionsContextLines(config.githubActionsContext, config.reportLanguage);
     const workItems = groups.slice(0, 8).map((group) => `- ${formatGroup(group)}`);
     const blockers = groups
         .flatMap((group) => group.activities
@@ -42715,6 +42737,7 @@ function generateSlackSummary(config, groups, reportPath) {
     const lines = [
         title,
         "",
+        ...(runLines.length > 0 ? [runLabel, ...runLines, ""] : []),
         workLabel,
         ...(workItems.length > 0 ? workItems : [isJapanese ? "- 活動なし" : "- No activity found"]),
         "",
@@ -42725,6 +42748,31 @@ function generateSlackSummary(config, groups, reportPath) {
         reportPath
     ];
     return slack_truncate(lines.join("\n"), 3500);
+}
+function githubActionsContextLines(context, language) {
+    if (!context) {
+        return [];
+    }
+    const isJapanese = language === "ja";
+    const runUrl = githubActionsRunUrl(context);
+    return [
+        context.actor ? `- ${isJapanese ? "実行者" : "Actor"}: ${context.actor}` : undefined,
+        context.workflow || context.runNumber
+            ? `- Workflow: ${[context.workflow, context.runNumber ? `#${context.runNumber}` : undefined].filter(Boolean).join(" ")}`
+            : undefined,
+        context.repository || context.refName
+            ? `- Repository: ${[context.repository, context.refName ? `(${context.refName})` : undefined].filter(Boolean).join(" ")}`
+            : undefined,
+        context.eventName ? `- Event: ${context.eventName}` : undefined,
+        runUrl ? `- URL: ${runUrl}` : undefined
+    ].filter((line) => Boolean(line));
+}
+function githubActionsRunUrl(context) {
+    if (!context.repository || !context.runId) {
+        return undefined;
+    }
+    const serverUrl = context.serverUrl ?? "https://github.com";
+    return `${serverUrl.replace(/\/+$/g, "")}/${context.repository}/actions/runs/${context.runId}`;
 }
 async function sendSlackNotification(webhookUrl, text) {
     if (!webhookUrl) {

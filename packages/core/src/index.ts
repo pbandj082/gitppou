@@ -4,6 +4,7 @@ export type {
   ActivitySource,
   BacklogSpaceConfig,
   GitHubRepoOwnerSpec,
+  GitHubActionsContext,
   GitHubRepoSort,
   GitHubRepoSpec,
   GitppouConfig,

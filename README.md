@@ -292,7 +292,7 @@ env:
   SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
 ```
 
-Slack receives a summary, not the full raw activity. Slack failures are warnings in v1 and do not fail the action.
+Slack receives a summary, not the full raw activity. When running in GitHub Actions, the summary includes the actor, workflow, repository/ref, event, and workflow run URL. Slack failures are warnings in v1 and do not fail the action.
 
 ## Commit Behavior
 
