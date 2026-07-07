@@ -46,6 +46,7 @@ export function buildGitppouConfig(
   const root = asObject(rawConfig, "config");
   const github = getSection(root, "github");
   const backlog = getSection(root, "backlog");
+  const hasBacklogSection = root.backlog !== undefined;
   const report = getSection(root, "report");
   const llm = getSection(root, "llm");
   const slack = getSection(root, "slack");
@@ -66,13 +67,13 @@ export function buildGitppouConfig(
     "llm-max-input-chars"
   );
   const slackNotify = options.slackNotify ?? getOptionalBoolean(slack, "notify", "config.slack.notify") ?? true;
+  const backlogEnabled = getOptionalBoolean(backlog, "enabled", "config.backlog.enabled") ?? hasBacklogSection;
 
   const config: GitppouConfig = {
     githubToken: requiredEnv(env, getString(github, "tokenEnv", "config.github.tokenEnv") || "GITHUB_TOKEN"),
     githubUsername: requiredString(github, "username", "config.github.username"),
     githubRepos: getGitHubRepoSpecs(github, "repos", "config.github.repos"),
-    backlogApiKey: requiredEnv(env, "BACKLOG_API_KEY"),
-    backlogSpaces: resolveBacklogSpaces(backlog),
+    backlogSpaces: backlogEnabled ? resolveBacklogSpaces(backlog) : [],
     reportDate,
     reportTimezone,
     reportLanguage: parseReportLanguage(
@@ -93,9 +94,13 @@ export function buildGitppouConfig(
     config.githubTokensByOwner = githubTokensByOwner;
   }
 
-  const backlogUserId = getString(backlog, "userId", "config.backlog.userId");
-  if (backlogUserId) {
-    config.backlogUserId = normalizeBacklogUserId(backlogUserId, "config.backlog.userId");
+  if (backlogEnabled) {
+    config.backlogApiKey = requiredEnv(env, "BACKLOG_API_KEY");
+
+    const backlogUserId = getString(backlog, "userId", "config.backlog.userId");
+    if (backlogUserId) {
+      config.backlogUserId = normalizeBacklogUserId(backlogUserId, "config.backlog.userId");
+    }
   }
 
   if (config.slackNotify) {

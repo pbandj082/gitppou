@@ -1,8 +1,12 @@
 import { isOnReportDate } from "./config.js";
 import type { BacklogSpaceConfig, GitppouConfig, NormalizedActivity } from "./types.js";
 
-type BacklogSpaceContext = BacklogSpaceConfig &
-  Pick<GitppouConfig, "backlogApiKey" | "backlogUserId" | "reportDate" | "reportTimezone">;
+type BacklogSpaceContext = BacklogSpaceConfig & {
+  backlogApiKey: string;
+  backlogUserId?: string;
+  reportDate: string;
+  reportTimezone: string;
+};
 
 type BacklogUser = {
   id: number;
@@ -15,6 +19,11 @@ type BacklogProject = {
   name: string;
 };
 
+type BacklogNamedValue = {
+  id: number;
+  name: string;
+};
+
 type BacklogIssue = {
   id: number;
   issueKey: string;
@@ -23,15 +32,15 @@ type BacklogIssue = {
   url?: string;
   created?: string;
   updated?: string;
+  startDate?: string | null;
   dueDate?: string | null;
   status?: {
     id: number;
     name: string;
   };
-  priority?: {
-    id: number;
-    name: string;
-  };
+  issueType?: BacklogNamedValue | null;
+  category?: BacklogNamedValue[] | null;
+  milestone?: BacklogNamedValue[] | null;
   assignee?: BacklogUser | null;
   createdUser?: BacklogUser;
 };
@@ -51,13 +60,23 @@ type BacklogComment = {
 };
 
 type QueryValue = string | number | boolean | readonly (string | number | boolean)[];
+const ASSIGNED_PROGRESS_FETCH_LIMIT = 50;
 
 export async function fetchBacklogActivities(config: GitppouConfig): Promise<NormalizedActivity[]> {
+  if (config.backlogSpaces.length === 0) {
+    return [];
+  }
+
+  if (!config.backlogApiKey) {
+    throw new Error("BACKLOG_API_KEY is required when Backlog is enabled.");
+  }
+
+  const backlogApiKey = config.backlogApiKey;
   const activitySets = await Promise.all(
     config.backlogSpaces.map((spaceConfig) =>
       fetchBacklogSpaceActivities({
         ...spaceConfig,
-        backlogApiKey: config.backlogApiKey,
+        backlogApiKey,
         ...(config.backlogUserId ? { backlogUserId: config.backlogUserId } : {}),
         reportDate: config.reportDate,
         reportTimezone: config.reportTimezone
@@ -71,16 +90,29 @@ export async function fetchBacklogActivities(config: GitppouConfig): Promise<Nor
 async function fetchBacklogSpaceActivities(config: BacklogSpaceContext): Promise<NormalizedActivity[]> {
   const resolvedConfig = await resolveBacklogUserId(config);
   const projectIds = await resolveProjectIds(resolvedConfig);
-  const issues = await fetchRelevantIssues(resolvedConfig, projectIds);
-  const commentLists = await Promise.all(issues.map((issue) => fetchIssueComments(resolvedConfig, issue.issueKey)));
+  const activityIssues = await fetchRelevantIssues(resolvedConfig, projectIds);
+  const assignedProgressIssues = await fetchAssignedProgressIssues(resolvedConfig, projectIds);
+  const commentLists = await Promise.all(
+    activityIssues.map((issue) => fetchIssueComments(resolvedConfig, issue.issueKey))
+  );
 
-  return issues.flatMap((issue, index) => {
+  const activityItems = activityIssues.flatMap((issue, index) => {
     const comments = commentLists[index] ?? [];
+    const commentActivities = commentsToActivities(resolvedConfig, issue, comments);
+    const issueActivities = issueToActivities(resolvedConfig, issue).filter(
+      (activity) => activity.kind !== "issue" || commentActivities.length === 0
+    );
+
     return [
-      ...issueToActivities(resolvedConfig, issue),
-      ...commentsToActivities(resolvedConfig, issue, comments)
+      ...issueActivities,
+      ...commentActivities
     ];
   });
+
+  return [
+    ...activityItems,
+    ...assignedProgressIssues.flatMap((issue) => issueToAssignedProgressActivity(resolvedConfig, issue))
+  ];
 }
 
 async function resolveBacklogUserId(config: BacklogSpaceContext): Promise<BacklogSpaceContext> {
@@ -137,7 +169,9 @@ async function fetchRelevantIssues(config: BacklogSpaceContext, projectIds: numb
   const assignedIssues = config.backlogUserId
     ? await backlogGet<BacklogIssue[]>(config, "/issues", {
         ...commonParams,
-        "assigneeId[]": [config.backlogUserId]
+        "assigneeId[]": [config.backlogUserId],
+        updatedSince: config.reportDate,
+        updatedUntil: config.reportDate
       })
     : [];
 
@@ -147,6 +181,28 @@ async function fetchRelevantIssues(config: BacklogSpaceContext, projectIds: numb
   }
 
   return [...issues.values()];
+}
+
+async function fetchAssignedProgressIssues(
+  config: BacklogSpaceContext,
+  projectIds: number[]
+): Promise<BacklogIssue[]> {
+  if (!config.backlogUserId) {
+    return [];
+  }
+
+  const params: Record<string, QueryValue> = {
+    count: ASSIGNED_PROGRESS_FETCH_LIMIT,
+    sort: "updated",
+    order: "desc",
+    "assigneeId[]": [config.backlogUserId]
+  };
+
+  if (projectIds.length > 0) {
+    params["projectId[]"] = projectIds;
+  }
+
+  return backlogGet<BacklogIssue[]>(config, "/issues", params);
 }
 
 async function fetchIssueComments(config: BacklogSpaceContext, issueKey: string): Promise<BacklogComment[]> {
@@ -159,16 +215,9 @@ async function fetchIssueComments(config: BacklogSpaceContext, issueKey: string)
 function issueToActivities(config: BacklogSpaceContext, issue: BacklogIssue): NormalizedActivity[] {
   const activities: NormalizedActivity[] = [];
   const projectKey = getProjectKey(issue.issueKey);
-  const metadata = compactMetadata({
-    backlogIssueId: issue.id,
-    backlogSpace: config.space,
-    status: issue.status?.name,
-    priority: issue.priority?.name,
-    assignee: issue.assignee?.name,
-    dueDate: issue.dueDate ?? undefined
-  });
+  const metadata = issueMetadata(config, issue);
 
-  if (isOnReportDate(issue.updated, config.reportDate, config.reportTimezone) || isAssignedToUser(config, issue)) {
+  if (isOnReportDate(issue.updated, config.reportDate, config.reportTimezone)) {
     activities.push({
       source: "backlog",
       kind: "issue",
@@ -183,7 +232,7 @@ function issueToActivities(config: BacklogSpaceContext, issue: BacklogIssue): No
     });
   }
 
-  if (issue.dueDate && issue.dueDate <= config.reportDate && isAssignedToUser(config, issue)) {
+  if (issue.dueDate === config.reportDate && isAssignedToUser(config, issue)) {
     activities.push({
       source: "backlog",
       kind: "due_issue",
@@ -197,6 +246,43 @@ function issueToActivities(config: BacklogSpaceContext, issue: BacklogIssue): No
   }
 
   return activities;
+}
+
+function issueToAssignedProgressActivity(
+  config: BacklogSpaceContext,
+  issue: BacklogIssue
+): NormalizedActivity[] {
+  if (!isAssignedToUser(config, issue)) {
+    return [];
+  }
+
+  if (issue.status?.name && isResolvedBacklogStatus(issue.status.name)) {
+    return [];
+  }
+
+  const startDate = dateOnly(issue.startDate);
+  const dueDate = dateOnly(issue.dueDate);
+  if (!startDate && !dueDate) {
+    return [];
+  }
+
+  const projectKey = getProjectKey(issue.issueKey);
+  return [
+    {
+      source: "backlog",
+      kind: "assigned_issue",
+      projectKey,
+      issueKey: issue.issueKey,
+      title: `${issue.issueKey} ${issue.summary}`,
+      url: buildIssueUrl(config, issue.issueKey),
+      ...(issue.updated ? { updatedAt: issue.updated } : {}),
+      metadata: compactMetadata({
+        ...issueMetadata(config, issue),
+        ...(startDate ? { startDate } : {}),
+        ...(dueDate ? { dueDate } : {})
+      })
+    }
+  ];
 }
 
 function commentsToActivities(
@@ -218,9 +304,8 @@ function commentsToActivities(
 
     const url = `${buildIssueUrl(config, issue.issueKey)}#comment-${comment.id}`;
     const metadata = compactMetadata({
-      backlogIssueId: issue.id,
+      ...issueMetadata(config, issue),
       backlogCommentId: comment.id,
-      backlogSpace: config.space,
       author: comment.createdUser?.name
     });
 
@@ -230,7 +315,7 @@ function commentsToActivities(
         kind: "comment",
         projectKey,
         issueKey: issue.issueKey,
-        title: `${issue.issueKey} comment: ${issue.summary}`,
+        title: `${issue.issueKey} ${issue.summary}`,
         body: comment.content.trim(),
         url,
         ...(comment.created ? { createdAt: comment.created } : {}),
@@ -249,13 +334,14 @@ function commentsToActivities(
         kind: "status_change",
         projectKey,
         issueKey: issue.issueKey,
-        title: `${issue.issueKey} status changed: ${issue.summary}`,
+        title: `${issue.issueKey} ${issue.summary}`,
         body: describeStatusChange(change.originalValue, change.newValue),
         url,
         ...(comment.created ? { createdAt: comment.created } : {}),
         metadata: compactMetadata({
           ...metadata,
           field: change.field,
+          status: change.newValue,
           originalValue: change.originalValue,
           newValue: change.newValue
         })
@@ -302,6 +388,30 @@ async function backlogGet<T>(
 
 function isAssignedToUser(config: BacklogSpaceContext, issue: BacklogIssue): boolean {
   return Boolean(config.backlogUserId && String(issue.assignee?.id) === config.backlogUserId);
+}
+
+function issueMetadata(config: BacklogSpaceContext, issue: BacklogIssue): Record<string, unknown> {
+  return compactMetadata({
+    backlogIssueId: issue.id,
+    backlogSpace: config.space,
+    issueType: issue.issueType?.name,
+    categories: namesOf(issue.category),
+    milestones: namesOf(issue.milestone),
+    status: issue.status?.name
+  });
+}
+
+function namesOf(values: BacklogNamedValue[] | null | undefined): string[] | undefined {
+  const names = (values ?? []).map((value) => value.name).filter(Boolean);
+  return names.length > 0 ? names : undefined;
+}
+
+function dateOnly(value: string | null | undefined): string | undefined {
+  return value?.match(/^\d{4}-\d{2}-\d{2}/)?.[0];
+}
+
+function isResolvedBacklogStatus(status: string): boolean {
+  return /done|closed|resolved|completed|処理済み|完了|対応済み|終了|クローズ/i.test(status);
 }
 
 function backlogHost(config: BacklogSpaceContext): string {
@@ -363,5 +473,17 @@ function describeStatusChange(originalValue: string | undefined, newValue: strin
 }
 
 function compactMetadata(values: Record<string, unknown>): Record<string, unknown> {
-  return Object.fromEntries(Object.entries(values).filter(([, value]) => value !== undefined && value !== ""));
+  return Object.fromEntries(
+    Object.entries(values).filter(([, value]) => {
+      if (value === undefined || value === null || value === "") {
+        return false;
+      }
+
+      if (Array.isArray(value) && value.length === 0) {
+        return false;
+      }
+
+      return true;
+    })
+  );
 }

@@ -47,6 +47,8 @@ github:
     - owner/repo
 
 backlog:
+  # Set enabled: false to generate reports from GitHub only.
+  # enabled: false
   # Optional numeric Backlog user id. Omit to use the API key owner.
   # userId: "123456"
   spaces:
@@ -174,6 +176,8 @@ llm:
 ```
 
 Template mode does not send activity data to an external LLM. It creates a fact-based Markdown report directly from normalized GitHub and Backlog activity.
+When Backlog is enabled, the progress section can include a Mermaid gantt chart for recent unresolved issues assigned to the configured Backlog user. Those assigned issue entries are progress context only and are not counted as work completed on the report date.
+The next actions section is placed directly after progress and prefers assigned issues whose gantt schedule includes the next day.
 
 ## Local Preview
 
@@ -216,6 +220,13 @@ backlog:
         - OPS
 ```
 
+Omit Backlog or disable it to generate a GitHub-only report:
+
+```yaml
+backlog:
+  enabled: false
+```
+
 ## GitHub Models Mode
 
 GitHub Models mode is opt-in:
@@ -226,7 +237,7 @@ llm:
   model: openai/gpt-4o-mini
 ```
 
-When `llm.provider` is set to `github-models`, Gitppou sends normalized GitHub and Backlog activity data to GitHub Models for report generation. Gitppou first creates a fact-based template report, then asks GitHub Models to refine that report without inventing unsupported work.
+When `llm.provider` is set to `github-models`, Gitppou sends normalized GitHub and Backlog activity data to GitHub Models for report generation. Backlog activities include issue metadata such as issue type and category when available. Gitppou first creates a fact-based template report, then asks GitHub Models to refine that report without inventing unsupported work.
 
 GitHub Models can be used with a free, rate-limited quota available to GitHub accounts. For production or higher-volume use, users may need to enable paid GitHub Models usage. GitHub Models billing is separate from GitHub Copilot billing.
 

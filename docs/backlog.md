@@ -19,6 +19,13 @@ backlog:
 
 Set `BACKLOG_API_KEY` in the workflow environment from a secret.
 
+Omit Backlog or disable it to generate a GitHub-only report:
+
+```yaml
+backlog:
+  enabled: false
+```
+
 `userId` is optional. When omitted, Gitppou calls `/api/v2/users/myself` and uses the numeric `id` returned by Backlog. If you set it explicitly, use that numeric `id`, not the Backlog `userId` handle, Nulab account ID, display name, or space key.
 
 `host` is optional. When omitted, Gitppou uses `{space}.backlog.com`. Set `host` if your Backlog URL uses another host, such as `{space}.backlog.jp`.
@@ -47,12 +54,15 @@ https://{space}.backlog.com/api/v2
 The v1 implementation collects:
 
 - Issues updated on the report date.
-- Issues assigned to the configured Backlog user ID.
-- Comments for relevant issues.
+- Comments created by the configured Backlog user on relevant issues.
 - Status changes when they are available in Backlog comment change logs.
-- Due or overdue assigned issues.
+- Assigned issues whose due date is the report date.
+- Recently updated unresolved issues assigned to the configured Backlog user for the progress chart.
+- Issue metadata used for grouping context, such as issue type and category.
 
 Backlog data is normalized into the same activity model used by GitHub data, then grouped by Backlog issue key.
+Assigned issue context is used only in the progress section and is not treated as work completed on the report date.
+When assigned issue context is available, next actions prefer issues whose gantt schedule includes the day after the report date.
 
 ## Project Key Filtering
 

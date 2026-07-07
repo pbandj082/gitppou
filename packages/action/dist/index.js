@@ -36156,7 +36156,7 @@ exports.visitAsync = visitAsync;
 /* harmony import */ var node_fs_promises__WEBPACK_IMPORTED_MODULE_0__ = __nccwpck_require__(1455);
 /* harmony import */ var node_path__WEBPACK_IMPORTED_MODULE_1__ = __nccwpck_require__(6760);
 /* harmony import */ var _actions_core__WEBPACK_IMPORTED_MODULE_2__ = __nccwpck_require__(4442);
-/* harmony import */ var _gitppou_core__WEBPACK_IMPORTED_MODULE_3__ = __nccwpck_require__(4768);
+/* harmony import */ var _gitppou_core__WEBPACK_IMPORTED_MODULE_3__ = __nccwpck_require__(6123);
 /* harmony import */ var yaml__WEBPACK_IMPORTED_MODULE_4__ = __nccwpck_require__(3328);
 
 
@@ -36243,7 +36243,7 @@ async function git(args) {
 
 __nccwpck_require__.a(__webpack_module__, async (__webpack_handle_async_dependencies__, __webpack_async_result__) => { try {
 /* harmony import */ var _actions_core__WEBPACK_IMPORTED_MODULE_0__ = __nccwpck_require__(4442);
-/* harmony import */ var _gitppou_core__WEBPACK_IMPORTED_MODULE_1__ = __nccwpck_require__(4768);
+/* harmony import */ var _gitppou_core__WEBPACK_IMPORTED_MODULE_1__ = __nccwpck_require__(6123);
 /* harmony import */ var _config_js__WEBPACK_IMPORTED_MODULE_2__ = __nccwpck_require__(9820);
 /* harmony import */ var _git_js__WEBPACK_IMPORTED_MODULE_3__ = __nccwpck_require__(288);
 
@@ -36274,7 +36274,7 @@ __webpack_async_result__();
 
 /***/ }),
 
-/***/ 4768:
+/***/ 6123:
 /***/ ((__unused_webpack___webpack_module__, __webpack_exports__, __nccwpck_require__) => {
 
 
@@ -36438,6 +36438,7 @@ function buildGitppouConfig(rawConfig, options, env, now = new Date()) {
     const root = asObject(rawConfig, "config");
     const github = getSection(root, "github");
     const backlog = getSection(root, "backlog");
+    const hasBacklogSection = root.backlog !== undefined;
     const report = getSection(root, "report");
     const llm = getSection(root, "llm");
     const slack = getSection(root, "slack");
@@ -36449,12 +36450,12 @@ function buildGitppouConfig(rawConfig, options, env, now = new Date()) {
         getStringOrNumber(llm, "maxInputChars", "config.llm.maxInputChars") ??
         String(DEFAULT_LLM_MAX_INPUT_CHARS), "llm-max-input-chars");
     const slackNotify = options.slackNotify ?? getOptionalBoolean(slack, "notify", "config.slack.notify") ?? true;
+    const backlogEnabled = getOptionalBoolean(backlog, "enabled", "config.backlog.enabled") ?? hasBacklogSection;
     const config = {
         githubToken: requiredEnv(env, getString(github, "tokenEnv", "config.github.tokenEnv") || "GITHUB_TOKEN"),
         githubUsername: requiredString(github, "username", "config.github.username"),
         githubRepos: getGitHubRepoSpecs(github, "repos", "config.github.repos"),
-        backlogApiKey: requiredEnv(env, "BACKLOG_API_KEY"),
-        backlogSpaces: resolveBacklogSpaces(backlog),
+        backlogSpaces: backlogEnabled ? resolveBacklogSpaces(backlog) : [],
         reportDate,
         reportTimezone,
         reportLanguage: parseReportLanguage(options.reportLanguage ?? getString(report, "language", "config.report.language") ?? DEFAULT_REPORT_LANGUAGE),
@@ -36469,9 +36470,12 @@ function buildGitppouConfig(rawConfig, options, env, now = new Date()) {
     if (Object.keys(githubTokensByOwner).length > 0) {
         config.githubTokensByOwner = githubTokensByOwner;
     }
-    const backlogUserId = getString(backlog, "userId", "config.backlog.userId");
-    if (backlogUserId) {
-        config.backlogUserId = normalizeBacklogUserId(backlogUserId, "config.backlog.userId");
+    if (backlogEnabled) {
+        config.backlogApiKey = requiredEnv(env, "BACKLOG_API_KEY");
+        const backlogUserId = getString(backlog, "userId", "config.backlog.userId");
+        if (backlogUserId) {
+            config.backlogUserId = normalizeBacklogUserId(backlogUserId, "config.backlog.userId");
+        }
     }
     if (config.slackNotify) {
         const slackWebhookUrl = options.requireSlackWebhook
@@ -36739,10 +36743,18 @@ function isObject(value) {
 
 ;// CONCATENATED MODULE: ../core/dist/backlog.js
 
+const ASSIGNED_PROGRESS_FETCH_LIMIT = 50;
 async function fetchBacklogActivities(config) {
+    if (config.backlogSpaces.length === 0) {
+        return [];
+    }
+    if (!config.backlogApiKey) {
+        throw new Error("BACKLOG_API_KEY is required when Backlog is enabled.");
+    }
+    const backlogApiKey = config.backlogApiKey;
     const activitySets = await Promise.all(config.backlogSpaces.map((spaceConfig) => fetchBacklogSpaceActivities({
         ...spaceConfig,
-        backlogApiKey: config.backlogApiKey,
+        backlogApiKey,
         ...(config.backlogUserId ? { backlogUserId: config.backlogUserId } : {}),
         reportDate: config.reportDate,
         reportTimezone: config.reportTimezone
@@ -36752,15 +36764,22 @@ async function fetchBacklogActivities(config) {
 async function fetchBacklogSpaceActivities(config) {
     const resolvedConfig = await resolveBacklogUserId(config);
     const projectIds = await resolveProjectIds(resolvedConfig);
-    const issues = await fetchRelevantIssues(resolvedConfig, projectIds);
-    const commentLists = await Promise.all(issues.map((issue) => fetchIssueComments(resolvedConfig, issue.issueKey)));
-    return issues.flatMap((issue, index) => {
+    const activityIssues = await fetchRelevantIssues(resolvedConfig, projectIds);
+    const assignedProgressIssues = await fetchAssignedProgressIssues(resolvedConfig, projectIds);
+    const commentLists = await Promise.all(activityIssues.map((issue) => fetchIssueComments(resolvedConfig, issue.issueKey)));
+    const activityItems = activityIssues.flatMap((issue, index) => {
         const comments = commentLists[index] ?? [];
+        const commentActivities = commentsToActivities(resolvedConfig, issue, comments);
+        const issueActivities = issueToActivities(resolvedConfig, issue).filter((activity) => activity.kind !== "issue" || commentActivities.length === 0);
         return [
-            ...issueToActivities(resolvedConfig, issue),
-            ...commentsToActivities(resolvedConfig, issue, comments)
+            ...issueActivities,
+            ...commentActivities
         ];
     });
+    return [
+        ...activityItems,
+        ...assignedProgressIssues.flatMap((issue) => issueToAssignedProgressActivity(resolvedConfig, issue))
+    ];
 }
 async function resolveBacklogUserId(config) {
     if (config.backlogUserId) {
@@ -36804,7 +36823,9 @@ async function fetchRelevantIssues(config, projectIds) {
     const assignedIssues = config.backlogUserId
         ? await backlogGet(config, "/issues", {
             ...commonParams,
-            "assigneeId[]": [config.backlogUserId]
+            "assigneeId[]": [config.backlogUserId],
+            updatedSince: config.reportDate,
+            updatedUntil: config.reportDate
         })
         : [];
     const issues = new Map();
@@ -36812,6 +36833,21 @@ async function fetchRelevantIssues(config, projectIds) {
         issues.set(issue.issueKey, issue);
     }
     return [...issues.values()];
+}
+async function fetchAssignedProgressIssues(config, projectIds) {
+    if (!config.backlogUserId) {
+        return [];
+    }
+    const params = {
+        count: ASSIGNED_PROGRESS_FETCH_LIMIT,
+        sort: "updated",
+        order: "desc",
+        "assigneeId[]": [config.backlogUserId]
+    };
+    if (projectIds.length > 0) {
+        params["projectId[]"] = projectIds;
+    }
+    return backlogGet(config, "/issues", params);
 }
 async function fetchIssueComments(config, issueKey) {
     return backlogGet(config, `/issues/${encodeURIComponent(issueKey)}/comments`, {
@@ -36822,15 +36858,8 @@ async function fetchIssueComments(config, issueKey) {
 function issueToActivities(config, issue) {
     const activities = [];
     const projectKey = getProjectKey(issue.issueKey);
-    const metadata = compactMetadata({
-        backlogIssueId: issue.id,
-        backlogSpace: config.space,
-        status: issue.status?.name,
-        priority: issue.priority?.name,
-        assignee: issue.assignee?.name,
-        dueDate: issue.dueDate ?? undefined
-    });
-    if (isOnReportDate(issue.updated, config.reportDate, config.reportTimezone) || isAssignedToUser(config, issue)) {
+    const metadata = issueMetadata(config, issue);
+    if (isOnReportDate(issue.updated, config.reportDate, config.reportTimezone)) {
         activities.push({
             source: "backlog",
             kind: "issue",
@@ -36844,7 +36873,7 @@ function issueToActivities(config, issue) {
             metadata
         });
     }
-    if (issue.dueDate && issue.dueDate <= config.reportDate && isAssignedToUser(config, issue)) {
+    if (issue.dueDate === config.reportDate && isAssignedToUser(config, issue)) {
         activities.push({
             source: "backlog",
             kind: "due_issue",
@@ -36858,6 +36887,36 @@ function issueToActivities(config, issue) {
     }
     return activities;
 }
+function issueToAssignedProgressActivity(config, issue) {
+    if (!isAssignedToUser(config, issue)) {
+        return [];
+    }
+    if (issue.status?.name && isResolvedBacklogStatus(issue.status.name)) {
+        return [];
+    }
+    const startDate = dateOnly(issue.startDate);
+    const dueDate = dateOnly(issue.dueDate);
+    if (!startDate && !dueDate) {
+        return [];
+    }
+    const projectKey = getProjectKey(issue.issueKey);
+    return [
+        {
+            source: "backlog",
+            kind: "assigned_issue",
+            projectKey,
+            issueKey: issue.issueKey,
+            title: `${issue.issueKey} ${issue.summary}`,
+            url: buildIssueUrl(config, issue.issueKey),
+            ...(issue.updated ? { updatedAt: issue.updated } : {}),
+            metadata: compactMetadata({
+                ...issueMetadata(config, issue),
+                ...(startDate ? { startDate } : {}),
+                ...(dueDate ? { dueDate } : {})
+            })
+        }
+    ];
+}
 function commentsToActivities(config, issue, comments) {
     const activities = [];
     const projectKey = getProjectKey(issue.issueKey);
@@ -36870,9 +36929,8 @@ function commentsToActivities(config, issue, comments) {
         }
         const url = `${buildIssueUrl(config, issue.issueKey)}#comment-${comment.id}`;
         const metadata = compactMetadata({
-            backlogIssueId: issue.id,
+            ...issueMetadata(config, issue),
             backlogCommentId: comment.id,
-            backlogSpace: config.space,
             author: comment.createdUser?.name
         });
         if (comment.content?.trim()) {
@@ -36881,7 +36939,7 @@ function commentsToActivities(config, issue, comments) {
                 kind: "comment",
                 projectKey,
                 issueKey: issue.issueKey,
-                title: `${issue.issueKey} comment: ${issue.summary}`,
+                title: `${issue.issueKey} ${issue.summary}`,
                 body: comment.content.trim(),
                 url,
                 ...(comment.created ? { createdAt: comment.created } : {}),
@@ -36898,13 +36956,14 @@ function commentsToActivities(config, issue, comments) {
                 kind: "status_change",
                 projectKey,
                 issueKey: issue.issueKey,
-                title: `${issue.issueKey} status changed: ${issue.summary}`,
+                title: `${issue.issueKey} ${issue.summary}`,
                 body: describeStatusChange(change.originalValue, change.newValue),
                 url,
                 ...(comment.created ? { createdAt: comment.created } : {}),
                 metadata: compactMetadata({
                     ...metadata,
                     field: change.field,
+                    status: change.newValue,
                     originalValue: change.originalValue,
                     newValue: change.newValue
                 })
@@ -36939,6 +36998,26 @@ async function backlogGet(config, path, params) {
 }
 function isAssignedToUser(config, issue) {
     return Boolean(config.backlogUserId && String(issue.assignee?.id) === config.backlogUserId);
+}
+function issueMetadata(config, issue) {
+    return compactMetadata({
+        backlogIssueId: issue.id,
+        backlogSpace: config.space,
+        issueType: issue.issueType?.name,
+        categories: namesOf(issue.category),
+        milestones: namesOf(issue.milestone),
+        status: issue.status?.name
+    });
+}
+function namesOf(values) {
+    const names = (values ?? []).map((value) => value.name).filter(Boolean);
+    return names.length > 0 ? names : undefined;
+}
+function dateOnly(value) {
+    return value?.match(/^\d{4}-\d{2}-\d{2}/)?.[0];
+}
+function isResolvedBacklogStatus(status) {
+    return /done|closed|resolved|completed|処理済み|完了|対応済み|終了|クローズ/i.test(status);
 }
 function backlogHost(config) {
     return config.host?.trim() || `${config.space}.backlog.com`;
@@ -36985,7 +37064,15 @@ function describeStatusChange(originalValue, newValue) {
     return "Status changed.";
 }
 function compactMetadata(values) {
-    return Object.fromEntries(Object.entries(values).filter(([, value]) => value !== undefined && value !== ""));
+    return Object.fromEntries(Object.entries(values).filter(([, value]) => {
+        if (value === undefined || value === null || value === "") {
+            return false;
+        }
+        if (Array.isArray(value) && value.length === 0) {
+            return false;
+        }
+        return true;
+    }));
 }
 
 ;// CONCATENATED MODULE: ../../node_modules/.pnpm/universal-user-agent@7.0.3/node_modules/universal-user-agent/index.js
@@ -41556,32 +41643,97 @@ function getIssueNumberFromUrl(value) {
 var promises_ = __nccwpck_require__(1455);
 // EXTERNAL MODULE: external "node:path"
 var external_node_path_ = __nccwpck_require__(6760);
+;// CONCATENATED MODULE: ../core/dist/report-evidence.js
+function isUserActionActivity(activity) {
+    switch (activity.kind) {
+        case "issue":
+        case "assigned_issue":
+        case "due_issue":
+            return false;
+        default:
+            return true;
+    }
+}
+function filterUserActionActivities(activities) {
+    return activities.filter(isUserActionActivity);
+}
+function filterGroupsByUserActions(groups) {
+    return groups
+        .map((group) => ({
+        ...group,
+        activities: group.activities.filter(isUserActionActivity)
+    }))
+        .filter((group) => group.activities.length > 0);
+}
+function buildReportEvidence(activities) {
+    return {
+        userActions: activities.filter(isUserActionActivity).map(toEvidenceAction),
+        contextOnly: activities.filter((activity) => !isUserActionActivity(activity)).map(toEvidenceContext)
+    };
+}
+function toEvidenceAction(activity) {
+    return compactEvidence({
+        source: activity.source,
+        kind: activity.kind,
+        title: activity.title,
+        ...(activity.issueKey ? { issueKey: activity.issueKey } : {}),
+        ...(activity.repository ? { repository: activity.repository } : {}),
+        ...(activity.body ? { body: activity.body } : {}),
+        ...(activity.url ? { url: activity.url } : {}),
+        ...(activity.createdAt ? { createdAt: activity.createdAt } : {}),
+        ...(activity.updatedAt ? { updatedAt: activity.updatedAt } : {}),
+        ...(activity.metadata ? { metadata: activity.metadata } : {})
+    });
+}
+function toEvidenceContext(activity) {
+    return compactEvidence({
+        source: activity.source,
+        kind: activity.kind,
+        title: activity.title,
+        ...(activity.issueKey ? { issueKey: activity.issueKey } : {}),
+        ...(activity.repository ? { repository: activity.repository } : {}),
+        ...(activity.body ? { body: activity.body } : {}),
+        ...(activity.url ? { url: activity.url } : {}),
+        ...(activity.createdAt ? { createdAt: activity.createdAt } : {}),
+        ...(activity.updatedAt ? { updatedAt: activity.updatedAt } : {}),
+        ...(activity.metadata ? { metadata: activity.metadata } : {})
+    });
+}
+function compactEvidence(evidence) {
+    return Object.fromEntries(Object.entries(evidence).filter(([, value]) => {
+        if (value === undefined) {
+            return false;
+        }
+        if (typeof value === "object" && value !== null && Object.keys(value).length === 0) {
+            return false;
+        }
+        return true;
+    }));
+}
+
 ;// CONCATENATED MODULE: ../core/dist/llm/template.js
+
 const LABELS = {
     en: {
         title: "Daily Report",
         work: "Work completed today",
         progress: "Progress",
-        blockers: "Blockers / Questions",
         nextActions: "Next actions",
         rawActivity: "Raw Activity",
         github: "GitHub",
         backlog: "Backlog",
-        noActivity: "No GitHub or Backlog activity was found for this date.",
-        noBlockers: "None found in today's activity.",
+        noActivity: "No user action was found for this date.",
         noNextActions: "Needs confirmation."
     },
     ja: {
         title: "日報",
         work: "本日対応したこと",
         progress: "進捗",
-        blockers: "課題・相談事項",
         nextActions: "明日やること",
         rawActivity: "Raw Activity",
         github: "GitHub",
         backlog: "Backlog",
-        noActivity: "この日のGitHubまたはBacklogの活動は見つかりませんでした。",
-        noBlockers: "本日の活動からは見つかりませんでした。",
+        noActivity: "この日のユーザー行動は見つかりませんでした。",
         noNextActions: "確認が必要"
     }
 };
@@ -41590,38 +41742,33 @@ function applyTemplateProvider(templateDraft) {
 }
 function generateTemplateReport({ config, activities, groups }) {
     const labels = LABELS[config.reportLanguage];
+    const reportGroups = filterGroupsByUserActions(groups);
     const lines = [`# ${labels.title} - ${config.reportDate}`, ""];
     lines.push(`## ${labels.work}`, "");
-    if (groups.length === 0) {
+    if (reportGroups.length === 0) {
         lines.push(`- ${labels.noActivity}`, "");
     }
     else {
-        for (const group of groups) {
-            lines.push(`### ${formatGroupHeading(group)}`);
+        for (const group of reportGroups) {
+            const descriptionContext = descriptionContextForGroup(group);
+            lines.push(`### ${formatGroupHeading(group)}`, "");
+            const metadataLine = issueMetadataLine(group, config.reportLanguage);
+            if (metadataLine) {
+                lines.push(metadataLine, "");
+            }
             for (const activity of group.activities) {
-                lines.push(`- ${describeActivity(activity, config.reportLanguage)}`);
+                lines.push(`- ${describeActivity(activity, config.reportLanguage, descriptionContext)}`);
             }
             lines.push("");
         }
     }
     lines.push(`## ${labels.progress}`, "");
-    for (const line of progressLines(groups, config.reportLanguage)) {
-        lines.push(`- ${line}`);
-    }
-    lines.push("");
-    lines.push(`## ${labels.blockers}`, "");
-    const blockers = blockerLines(activities);
-    if (blockers.length === 0) {
-        lines.push(`- ${labels.noBlockers}`);
-    }
-    else {
-        for (const blocker of blockers) {
-            lines.push(`- ${blocker}`);
-        }
+    for (const line of progressLines(activities, reportGroups, config)) {
+        lines.push(line);
     }
     lines.push("");
     lines.push(`## ${labels.nextActions}`, "");
-    const nextActions = nextActionLines(groups, config.reportLanguage);
+    const nextActions = nextActionLines(activities, reportGroups, config);
     if (nextActions.length === 0) {
         lines.push(`- ${labels.noNextActions}`);
     }
@@ -41632,7 +41779,7 @@ function generateTemplateReport({ config, activities, groups }) {
     }
     lines.push("");
     lines.push(`## ${labels.rawActivity}`, "");
-    lines.push(`### ${labels.github}`);
+    lines.push(`### ${labels.github}`, "");
     for (const line of rawActivityLines(activities.filter((activity) => activity.source === "github"))) {
         lines.push(`- ${line}`);
     }
@@ -41640,7 +41787,7 @@ function generateTemplateReport({ config, activities, groups }) {
         lines.push("- None");
     }
     lines.push("");
-    lines.push(`### ${labels.backlog}`);
+    lines.push(`### ${labels.backlog}`, "");
     for (const line of rawActivityLines(activities.filter((activity) => activity.source === "backlog"))) {
         lines.push(`- ${line}`);
     }
@@ -41655,8 +41802,14 @@ function formatGroupHeading(group) {
     }
     return group.title ? `${group.issueKey} ${group.title}` : group.issueKey;
 }
-function describeActivity(activity, language) {
-    const prefix = activity.issueKey ? `${activity.issueKey}: ` : "";
+function descriptionContextForGroup(group) {
+    return {
+        ...(group.issueKey === "Unlinked" ? {} : { groupIssueKey: group.issueKey }),
+        ...(group.title ? { groupTitle: group.title } : {})
+    };
+}
+function describeActivity(activity, language, context = {}) {
+    const prefix = issuePrefix(activity, context);
     const title = stripMarkdownBreaks(activity.title);
     if (language === "ja") {
         switch (activity.kind) {
@@ -41667,13 +41820,15 @@ function describeActivity(activity, language) {
             case "review":
                 return `${prefix}PRレビューを実施: ${title}`;
             case "comment":
-                return `${prefix}コメントを追加: ${compactBody(activity.body) ?? title}`;
+                return `${prefix}${commentText(activity, title, context, "ja")}`;
             case "issue":
-                return `${prefix}Backlog課題を確認: ${title}${statusSuffix(activity)}`;
+                return `${prefix}Backlog課題が更新: ${title}${statusSuffix(activity, "現在のステータス")}`;
             case "status_change":
-                return `${prefix}${activity.body ?? "Backlogステータスを更新"}`;
+                return `${prefix}${statusChangeText(activity, "ja")}`;
+            case "assigned_issue":
+                return `${prefix}担当中のBacklog課題: ${title}`;
             case "due_issue":
-                return `${prefix}期限が近い、または期限を過ぎた課題: ${title}`;
+                return `${prefix}本日が期限の課題: ${title}`;
         }
     }
     switch (activity.kind) {
@@ -41684,18 +41839,78 @@ function describeActivity(activity, language) {
         case "review":
             return `${prefix}Reviewed pull request: ${title}`;
         case "comment":
-            return `${prefix}Commented: ${compactBody(activity.body) ?? title}`;
+            return `${prefix}${commentText(activity, title, context, "en")}`;
         case "issue":
-            return `${prefix}Backlog issue activity: ${title}${statusSuffix(activity)}`;
+            return `${prefix}Backlog issue updated: ${title}${statusSuffix(activity, "current status")}`;
         case "status_change":
-            return `${prefix}${activity.body ?? "Backlog status changed."}`;
+            return `${prefix}${statusChangeText(activity, "en")}`;
+        case "assigned_issue":
+            return `${prefix}Assigned Backlog issue: ${title}`;
         case "due_issue":
-            return `${prefix}Due or near-due assigned issue: ${title}`;
+            return `${prefix}Assigned issue due today: ${title}`;
     }
 }
-function progressLines(groups, language) {
+function issuePrefix(activity, context) {
+    if (!activity.issueKey) {
+        return "";
+    }
+    if (activity.issueKey === context.groupIssueKey) {
+        return "";
+    }
+    return `${activity.issueKey}: `;
+}
+function commentText(activity, title, context, language) {
+    const body = compactBody(activity.body);
+    const target = commentTarget(activity, title, context, language);
+    const isConfirmation = body ? isConfirmationComment(body) : false;
+    if (language === "ja") {
+        if (isConfirmation) {
+            return `${target}確認コメントを追加: ${body}`;
+        }
+        return `${target}コメントを追加: ${body ?? title}`;
+    }
+    if (isConfirmation) {
+        return `Added a confirmation comment ${target}: ${body}`;
+    }
+    return `Commented ${target}: ${body ?? title}`;
+}
+function commentTarget(activity, title, context, language) {
+    if (activity.issueKey && activity.issueKey === context.groupIssueKey) {
+        return language === "ja" ? "この課題について" : "on this issue";
+    }
+    const targetTitle = stripLeadingIssueKey(title, activity.issueKey);
+    if (targetTitle) {
+        return language === "ja" ? `「${targetTitle}」について` : `on "${targetTitle}"`;
+    }
+    return language === "ja" ? "" : "on the activity";
+}
+function issueMetadataLine(group, language) {
+    if (group.issueKey === "Unlinked") {
+        return undefined;
+    }
+    const issueType = firstStringMetadata(group.activities, "issueType");
+    const categories = firstStringArrayMetadata(group.activities, "categories");
+    const categoriesText = categories.join(", ");
+    const parts = language === "ja"
+        ? [
+            issueType ? `**種別:** ${metadataValue(issueType)}` : undefined,
+            categoriesText ? `**カテゴリー:** ${metadataValue(categoriesText)}` : undefined
+        ]
+        : [
+            issueType ? `**Type:** ${metadataValue(issueType)}` : undefined,
+            categoriesText ? `**Categories:** ${metadataValue(categoriesText)}` : undefined
+        ];
+    const line = parts.filter((part) => Boolean(part)).join(" / ");
+    return line || undefined;
+}
+function progressLines(activities, groups, config) {
+    const assignedIssues = assignedProgressActivities(activities, config.reportDate);
+    if (assignedIssues.length > 0) {
+        return assignedProgressLines(assignedIssues, config);
+    }
+    const language = config.reportLanguage;
     if (groups.length === 0) {
-        return [language === "ja" ? "記録された進捗はありません。" : "No recorded progress."];
+        return [`- ${language === "ja" ? "記録された進捗はありません。" : "No recorded progress."}`];
     }
     return groups.map((group) => {
         const status = firstStringMetadata(group.activities, "status");
@@ -41704,20 +41919,128 @@ function progressLines(groups, language) {
         const prefix = group.issueKey === "Unlinked" ? "Unlinked" : group.issueKey;
         if (language === "ja") {
             const statusText = status ? `ステータス: ${status}` : "ステータス確認が必要";
-            return `${prefix}: ${statusText}。GitHub ${githubCount}件、Backlog ${backlogCount}件。`;
+            return `- ${prefix}: ${statusText}。GitHub ${githubCount}件、Backlog ${backlogCount}件。`;
         }
         const statusText = status ? `status: ${status}` : "status needs confirmation";
-        return `${prefix}: ${statusText}; ${githubCount} GitHub item(s), ${backlogCount} Backlog item(s).`;
+        return `- ${prefix}: ${statusText}; ${githubCount} GitHub item(s), ${backlogCount} Backlog item(s).`;
     });
 }
-function blockerLines(activities) {
-    const pattern = /blocker|blocked|question|needs confirmation|確認|課題|相談|ブロック|未解決/i;
+function assignedProgressActivities(activities, reportDate) {
     return activities
-        .filter((activity) => pattern.test(`${activity.title}\n${activity.body ?? ""}`))
-        .slice(0, 8)
-        .map((activity) => `${activity.issueKey ? `${activity.issueKey}: ` : ""}${compactBody(activity.body) ?? activity.title}`);
+        .filter((activity) => activity.kind === "assigned_issue")
+        .filter((activity) => progressSchedule(activity, reportDate) !== undefined)
+        .sort((left, right) => compareProgressStartDate(left, right, reportDate))
+        .slice(0, 10);
 }
-function nextActionLines(groups, language) {
+function compareProgressStartDate(left, right, reportDate) {
+    const leftStart = progressStartDate(left, reportDate);
+    const rightStart = progressStartDate(right, reportDate);
+    return leftStart.localeCompare(rightStart) || left.title.localeCompare(right.title);
+}
+function assignedProgressLines(activities, config) {
+    const isJapanese = config.reportLanguage === "ja";
+    return [
+        "```mermaid",
+        "gantt",
+        `  title ${isJapanese ? "直近の担当課題" : "Recent assigned issues"}`,
+        "  dateFormat  YYYY-MM-DD",
+        "  axisFormat  %m/%d",
+        ...mermaidMilestoneSections(activities, config),
+        "```"
+    ];
+}
+function mermaidMilestoneSections(activities, config) {
+    const fallbackSection = config.reportLanguage === "ja" ? "マイルストーン未設定" : "No milestone";
+    const lines = [];
+    const sections = new Map();
+    for (const activity of activities) {
+        const section = firstStringArrayMetadata([activity], "milestones")[0] ?? fallbackSection;
+        const sectionActivities = sections.get(section) ?? [];
+        sectionActivities.push(activity);
+        sections.set(section, sectionActivities);
+    }
+    for (const [section, sectionActivities] of sections) {
+        lines.push(`  section ${mermaidText(section)}`);
+        for (const activity of sectionActivities) {
+            lines.push(`  ${mermaidTaskLine(activity, config.reportDate)}`);
+        }
+    }
+    return lines;
+}
+function mermaidTaskLine(activity, reportDate) {
+    const issueKey = activity.issueKey ?? "Unlinked";
+    const title = mermaidTaskTitle(activity);
+    const marker = mermaidStatusMarker(metadataString(activity, "status"));
+    const taskId = `task_${issueKey.replace(/[^A-Za-z0-9_]/g, "_")}`;
+    const markerPrefix = marker ? `${marker}, ${taskId}` : taskId;
+    const schedule = progressSchedule(activity, reportDate) ?? `${reportDate}, 1d`;
+    return `${title} :${markerPrefix}, ${schedule}`;
+}
+function mermaidTaskTitle(activity) {
+    const title = stripLeadingIssueKey(stripMarkdownBreaks(activity.title), activity.issueKey).slice(0, 80);
+    return mermaidText(`${activity.issueKey ?? "Unlinked"} ${title}`);
+}
+function mermaidText(value) {
+    return stripMarkdownBreaks(value).replace(/[:\n\r]/g, " -").replace(/,/g, "、");
+}
+function mermaidStatusMarker(status) {
+    if (!status) {
+        return undefined;
+    }
+    if (isResolvedStatus(status)) {
+        return "done";
+    }
+    if (/progress|review|処理|レビュー|確認依頼/i.test(status)) {
+        return "active";
+    }
+    return undefined;
+}
+function progressSchedule(activity, reportDate) {
+    const range = progressDateRange(activity, reportDate);
+    if (!range) {
+        return undefined;
+    }
+    if (range.start === range.due) {
+        return `${range.start}, 1d`;
+    }
+    return `${range.start}, ${range.due}`;
+}
+function progressDateRange(activity, reportDate) {
+    const startDate = metadataDate(activity, "startDate");
+    const dueDate = metadataDate(activity, "dueDate");
+    if (!startDate && !dueDate) {
+        return undefined;
+    }
+    const start = startDate ?? inferredStartDate(dueDate, reportDate);
+    const due = dueDate ?? startDate;
+    if (!start || !due) {
+        return undefined;
+    }
+    return { start, due };
+}
+function progressStartDate(activity, reportDate) {
+    return progressDateRange(activity, reportDate)?.start ?? "9999-12-31";
+}
+function inferredStartDate(dueDate, reportDate) {
+    if (!dueDate) {
+        return reportDate;
+    }
+    if (!reportDate) {
+        return dueDate;
+    }
+    return dueDate < reportDate ? dueDate : reportDate;
+}
+function template_addDays(date, days) {
+    const parsed = new Date(`${date}T00:00:00Z`);
+    parsed.setUTCDate(parsed.getUTCDate() + days);
+    return parsed.toISOString().slice(0, 10);
+}
+function nextActionLines(activities, groups, config) {
+    const scheduledActions = nextScheduledAssignedIssueLines(activities, config);
+    if (scheduledActions.length > 0) {
+        return scheduledActions;
+    }
+    const language = config.reportLanguage;
     const candidates = groups
         .filter((group) => group.activities.some((activity) => {
         const status = String(activity.metadata?.status ?? "").toLowerCase();
@@ -41734,6 +42057,33 @@ function nextActionLines(groups, language) {
         const heading = formatGroupHeading(group);
         return language === "ja" ? `${heading} の次の対応を確認` : `Confirm next step for ${heading}.`;
     });
+}
+function nextScheduledAssignedIssueLines(activities, config) {
+    const tomorrow = template_addDays(config.reportDate, 1);
+    return assignedProgressActivities(activities, config.reportDate)
+        .filter((activity) => progressIncludesDate(activity, tomorrow, config.reportDate))
+        .map((activity) => scheduledAssignedIssueLine(activity, config.reportLanguage));
+}
+function progressIncludesDate(activity, date, reportDate) {
+    const range = progressDateRange(activity, reportDate);
+    return Boolean(range && range.start <= date && date <= range.due);
+}
+function scheduledAssignedIssueLine(activity, language) {
+    const heading = stripMarkdownBreaks(activity.title);
+    const status = metadataString(activity, "status");
+    const dueDate = metadataDate(activity, "dueDate");
+    if (language === "ja") {
+        const detail = [
+            status ? `ステータス: ${status}` : undefined,
+            dueDate ? `期限: ${dueDate}` : undefined
+        ].filter((value) => Boolean(value));
+        return detail.length > 0 ? `${heading}: ${detail.join("、")}` : `${heading} の対応`;
+    }
+    const detail = [
+        status ? `status: ${status}` : undefined,
+        dueDate ? `due: ${dueDate}` : undefined
+    ].filter((value) => Boolean(value));
+    return detail.length > 0 ? `${heading}: ${detail.join("; ")}` : `Work on ${heading}.`;
 }
 function rawActivityLines(activities) {
     return activities.map((activity) => {
@@ -41756,13 +42106,42 @@ function labelForKind(kind) {
             return "Issue";
         case "status_change":
             return "Status";
+        case "assigned_issue":
+            return "Assigned";
         case "due_issue":
-            return "Due";
+            return "Due today";
     }
 }
-function statusSuffix(activity) {
+function statusSuffix(activity, label = "status") {
     const status = typeof activity.metadata?.status === "string" ? activity.metadata.status : undefined;
-    return status ? ` (${status})` : "";
+    return status ? ` (${label}: ${status})` : "";
+}
+function statusChangeText(activity, language) {
+    const originalValue = metadataString(activity, "originalValue");
+    const newValue = metadataString(activity, "newValue");
+    if (language === "ja") {
+        if (originalValue && newValue) {
+            return `ステータスを「${originalValue}」から「${newValue}」に変更`;
+        }
+        if (newValue) {
+            return `ステータスを「${newValue}」に変更`;
+        }
+        return "Backlogステータスを更新";
+    }
+    if (originalValue && newValue) {
+        return `Status changed from "${originalValue}" to "${newValue}".`;
+    }
+    if (newValue) {
+        return `Status changed to "${newValue}".`;
+    }
+    return activity.body ?? "Backlog status changed.";
+}
+function metadataString(activity, key) {
+    const value = activity.metadata?.[key];
+    return typeof value === "string" && value.trim() !== "" ? value : undefined;
+}
+function metadataDate(activity, key) {
+    return metadataString(activity, key)?.match(/^\d{4}-\d{2}-\d{2}/)?.[0];
 }
 function firstStringMetadata(activities, key) {
     for (const activity of activities) {
@@ -41773,6 +42152,18 @@ function firstStringMetadata(activities, key) {
     }
     return undefined;
 }
+function firstStringArrayMetadata(activities, key) {
+    for (const activity of activities) {
+        const value = activity.metadata?.[key];
+        if (Array.isArray(value)) {
+            return value.filter((item) => typeof item === "string" && item.trim() !== "");
+        }
+    }
+    return [];
+}
+function metadataValue(value) {
+    return stripMarkdownBreaks(value);
+}
 function compactBody(body) {
     if (!body) {
         return undefined;
@@ -41780,20 +42171,43 @@ function compactBody(body) {
     const compact = stripMarkdownBreaks(body).slice(0, 180);
     return compact.length < body.length ? `${compact}...` : compact;
 }
+function isConfirmationComment(value) {
+    return /確認しました|確認済み|確認いたしました|確認完了|confirmed|looks good|lgtm/i.test(stripMarkdownBreaks(value));
+}
+function isResolvedStatus(status) {
+    return /done|closed|resolved|completed|処理済み|完了|対応済み|終了|クローズ/i.test(status);
+}
+function stripLeadingIssueKey(title, issueKey) {
+    if (!issueKey) {
+        return title;
+    }
+    return title.replace(new RegExp(`^${escapeRegExp(issueKey)}[:：\\s-]*`), "").trim();
+}
+function escapeRegExp(value) {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 function stripMarkdownBreaks(value) {
     return value.replace(/\s+/g, " ").trim();
 }
 
 ;// CONCATENATED MODULE: ../core/dist/llm/github-models.js
+
 const GITHUB_MODELS_ENDPOINT = "https://models.github.ai/inference/chat/completions";
 const GITHUB_API_VERSION = "2026-03-10";
-async function refineWithGitHubModels({ config, templateDraft, activities }) {
-    const activitiesJson = JSON.stringify(activities, null, 2);
+async function refineWithGitHubModels({ config, templateDraft, activities, groups }) {
+    const evidenceJson = JSON.stringify({
+        ...buildReportEvidence(activities),
+        groupedUserActions: groups.map((group) => ({
+            issueKey: group.issueKey,
+            title: group.title,
+            actions: group.activities
+        }))
+    }, null, 2);
     const prompt = buildPrompt({
         date: config.reportDate,
         language: config.reportLanguage,
         templateDraft,
-        activitiesJson: truncate(activitiesJson, config.llmMaxInputChars)
+        evidenceJson: truncate(evidenceJson, config.llmMaxInputChars)
     });
     const response = await fetch(GITHUB_MODELS_ENDPOINT, {
         method: "POST",
@@ -41829,7 +42243,7 @@ function buildPrompt(input) {
     if (input.language === "ja") {
         return `あなたはエンジニアの日報作成アシスタントです。
 
-以下の活動ログとテンプレート日報をもとに、日本語の日報を作成してください。
+以下のユーザー行動の根拠、文脈情報、テンプレート日報をもとに、日本語の日報を作成してください。
 
 ルール:
 - 事実にないことは書かない
@@ -41837,8 +42251,12 @@ function buildPrompt(input) {
 - 不明な点は「確認が必要」と書く
 - Backlog課題キーを優先して整理する
 - GitHubのcommit/PRとBacklog課題が同じ課題キーを含む場合は同じ項目にまとめる
-- 課題・相談事項は、コメントやステータスから読み取れる範囲でのみ書く
-- 明日やることは、レビュー待ち、処理中、期限が近い課題から候補として書く
+- 「userActions」にある当日ユーザー本人の行動だけを「本日対応したこと」に書く
+- 「contextOnly」は直近の流れや課題の背景を説明するためだけに使い、ユーザー本人の作業として書かない
+- 種別、カテゴリーなどのmetadataは文脈として使い、ユーザー本人の作業として扱わない
+- Backlogの「issue」「assigned_issue」「due_issue」は、それだけではユーザー本人の作業として扱わない
+- テンプレート日報の進捗にMermaid ganttが含まれる場合は、事実と矛盾しない範囲で維持する
+- 明日やることは、レビュー待ち、処理中、本日が期限の課題から候補として書く
 - Markdownで出力する
 - 出力には日報本文のみを含める
 
@@ -41848,12 +42266,12 @@ ${input.date}
 テンプレート日報:
 ${input.templateDraft}
 
-正規化済み活動ログ:
-${input.activitiesJson}`;
+ユーザー行動の根拠と文脈情報:
+${input.evidenceJson}`;
     }
     return `You are an assistant that writes concise engineer daily reports.
 
-Create a daily report in English from the following activity logs and template report.
+Create a daily report in English from the following user-action evidence, context, and template report.
 
 Rules:
 - Do not write anything that is not supported by the activity data.
@@ -41861,8 +42279,12 @@ Rules:
 - If something is unclear, write "Needs confirmation".
 - Group work by Backlog issue key when possible.
 - If GitHub commits/PRs and Backlog issues share the same issue key, merge them into the same section.
-- Write blockers/questions only when they are supported by comments, statuses, or issue data.
-- For next actions, use review-waiting, in-progress, or near-due issues as candidates.
+- Write "Work completed today" only from entries in "userActions".
+- Use "contextOnly" only to explain recent flow or issue background. Do not present it as work done by the user.
+- Use metadata such as issue type and categories only as context. Do not present metadata as user work.
+- Do not treat Backlog "issue", "assigned_issue", or "due_issue" entries as user work by themselves.
+- If the template report includes a Mermaid gantt chart in the progress section, preserve it unless it conflicts with the evidence.
+- For next actions, use review-waiting, in-progress, or issues due today as candidates.
 - Output Markdown only.
 - Output only the report body.
 
@@ -41872,8 +42294,8 @@ ${input.date}
 Template report:
 ${input.templateDraft}
 
-Normalized activity logs:
-${input.activitiesJson}`;
+User-action evidence and context:
+${input.evidenceJson}`;
 }
 function truncate(value, maxChars) {
     if (value.length <= maxChars) {
@@ -41981,7 +42403,7 @@ function deriveGroupTitle(issueKey, activity) {
     if (issueKey === "Unlinked") {
         return undefined;
     }
-    return activity.title.replace(new RegExp(`^${escapeRegExp(issueKey)}\\s*[:\\-]?\\s*`), "").trim() || undefined;
+    return activity.title.replace(new RegExp(`^${normalize_escapeRegExp(issueKey)}\\s*[:\\-]?\\s*`), "").trim() || undefined;
 }
 function compareActivityDate(left, right) {
     return activityTime(left) - activityTime(right) || left.title.localeCompare(right.title);
@@ -42005,7 +42427,7 @@ function dedupeKey(activity) {
         activity.updatedAt ?? ""
     ].join("\u0000");
 }
-function escapeRegExp(value) {
+function normalize_escapeRegExp(value) {
     return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
@@ -42073,19 +42495,22 @@ function slack_truncate(value, maxChars) {
 
 
 
+
 async function generateDailyReport(config) {
     const [githubActivities, backlogActivities] = await fetchActivities(config);
     const backlogProjectKeys = config.backlogSpaces.flatMap((space) => space.projectKeys);
     const activities = normalizeActivities([...githubActivities, ...backlogActivities], backlogProjectKeys);
     const groups = groupActivitiesByIssueKey(activities);
-    const templateDraft = generateTemplateReport({ config, activities, groups });
+    const actionGroups = filterGroupsByUserActions(groups);
+    const templateDraft = generateTemplateReport({ config, activities, groups: actionGroups });
     let reportMarkdown = applyTemplateProvider(templateDraft);
     if (config.llmProvider === "github-models") {
         try {
             reportMarkdown = await refineWithGitHubModels({
                 config,
                 templateDraft,
-                activities
+                activities,
+                groups: actionGroups
             });
         }
         catch (error) {
@@ -42094,7 +42519,7 @@ async function generateDailyReport(config) {
     }
     const reportPath = buildReportPath(config.reportDir, config.reportDate);
     await saveReport(reportPath, reportMarkdown);
-    const slackSummary = generateSlackSummary(config, groups, reportPath);
+    const slackSummary = generateSlackSummary(config, actionGroups, reportPath);
     if (config.slackNotify) {
         try {
             await sendSlackNotification(config.slackWebhookUrl, slackSummary);

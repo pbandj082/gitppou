@@ -4,7 +4,7 @@
   "title": "Gitppou configuration",
   "type": "object",
   "additionalProperties": false,
-  "required": ["github", "backlog"],
+  "required": ["github"],
   "properties": {
     "github": {
       "type": "object",
@@ -54,8 +54,8 @@
     "backlog": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["spaces"],
       "properties": {
+        "enabled": { "type": "boolean" },
         "userId": { "type": "string", "pattern": "^\\d+$" },
         "spaces": {
           "type": "object",

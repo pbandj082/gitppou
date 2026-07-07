@@ -4,6 +4,7 @@ import { fetchBacklogActivities } from "./backlog.js";
 import { fetchGitHubActivities } from "./github.js";
 import { applyTemplateProvider, generateTemplateReport, refineWithGitHubModels } from "./llm/index.js";
 import { groupActivitiesByIssueKey, normalizeActivities } from "./normalize.js";
+import { filterGroupsByUserActions } from "./report-evidence.js";
 import { generateSlackSummary, sendSlackNotification } from "./slack.js";
 import type { GitppouConfig, NormalizedActivity, ReportResult } from "./types.js";
 
@@ -12,7 +13,8 @@ export async function generateDailyReport(config: GitppouConfig): Promise<Report
   const backlogProjectKeys = config.backlogSpaces.flatMap((space) => space.projectKeys);
   const activities = normalizeActivities([...githubActivities, ...backlogActivities], backlogProjectKeys);
   const groups = groupActivitiesByIssueKey(activities);
-  const templateDraft = generateTemplateReport({ config, activities, groups });
+  const actionGroups = filterGroupsByUserActions(groups);
+  const templateDraft = generateTemplateReport({ config, activities, groups: actionGroups });
   let reportMarkdown = applyTemplateProvider(templateDraft);
 
   if (config.llmProvider === "github-models") {
@@ -20,7 +22,8 @@ export async function generateDailyReport(config: GitppouConfig): Promise<Report
       reportMarkdown = await refineWithGitHubModels({
         config,
         templateDraft,
-        activities
+        activities,
+        groups: actionGroups
       });
     } catch (error) {
       console.warn(`Gitppou warning: GitHub Models failed; using template report. ${formatError(error)}`);
@@ -30,7 +33,7 @@ export async function generateDailyReport(config: GitppouConfig): Promise<Report
   const reportPath = buildReportPath(config.reportDir, config.reportDate);
   await saveReport(reportPath, reportMarkdown);
 
-  const slackSummary = generateSlackSummary(config, groups, reportPath);
+  const slackSummary = generateSlackSummary(config, actionGroups, reportPath);
   if (config.slackNotify) {
     try {
       await sendSlackNotification(config.slackWebhookUrl, slackSummary);

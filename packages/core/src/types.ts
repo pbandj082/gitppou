@@ -30,7 +30,7 @@ export type GitppouConfig = {
   githubUsername: string;
   githubRepos: GitHubRepoSpec[];
 
-  backlogApiKey: string;
+  backlogApiKey?: string;
   backlogUserId?: string;
   backlogSpaces: BacklogSpaceConfig[];
 
@@ -58,6 +58,7 @@ export type ActivityKind =
   | "comment"
   | "issue"
   | "status_change"
+  | "assigned_issue"
   | "due_issue";
 
 export type NormalizedActivity = {
