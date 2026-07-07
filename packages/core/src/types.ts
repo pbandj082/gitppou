@@ -58,6 +58,7 @@ export type ActivityKind =
   | "comment"
   | "issue"
   | "status_change"
+  | "assigned_issue"
   | "due_issue";
 
 export type NormalizedActivity = {

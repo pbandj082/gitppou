@@ -57,8 +57,12 @@ The v1 implementation collects:
 - Comments created by the configured Backlog user on relevant issues.
 - Status changes when they are available in Backlog comment change logs.
 - Assigned issues whose due date is the report date.
+- Recently updated unresolved issues assigned to the configured Backlog user for the progress chart.
+- Issue metadata used for grouping context, such as issue type and category.
 
 Backlog data is normalized into the same activity model used by GitHub data, then grouped by Backlog issue key.
+Assigned issue context is used only in the progress section and is not treated as work completed on the report date.
+When assigned issue context is available, next actions prefer issues whose gantt schedule includes the day after the report date.
 
 ## Project Key Filtering
 

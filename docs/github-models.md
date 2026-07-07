@@ -21,6 +21,8 @@ When `llm.provider` is `github-models`, Gitppou sends:
 
 - The fact-based template report.
 - Normalized GitHub and Backlog activity data.
+- Backlog issue metadata included in those activities, such as issue type and category.
+- Assigned Backlog issue context used by the progress gantt chart.
 
 The data is capped by `llm.maxInputChars`.
 
