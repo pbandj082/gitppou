@@ -204,7 +204,7 @@ Options:
 
 Environment:
   GITHUB_TOKEN                Required by default; configurable with github.tokenEnv
-  GITHUB_TOKEN_*              Optional owner-specific tokens referenced by github.tokens
+  GITPPOU_TOKEN_*             Optional owner-specific tokens referenced by github.tokens
   BACKLOG_API_KEY             Required
   SLACK_WEBHOOK_URL           Required only with --slack`;
 }

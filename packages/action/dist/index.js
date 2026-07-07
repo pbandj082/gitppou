@@ -36253,7 +36253,13 @@ __nccwpck_require__.a(__webpack_module__, async (__webpack_handle_async_dependen
 async function main() {
     try {
         const config = await (0,_config_js__WEBPACK_IMPORTED_MODULE_2__/* .readActionConfig */ .P)();
-        const result = await (0,_gitppou_core__WEBPACK_IMPORTED_MODULE_1__/* .generateDailyReport */ .jl)(config);
+        const sendSlackAfterCommit = config.commitReport && config.slackNotify;
+        const result = await (0,_gitppou_core__WEBPACK_IMPORTED_MODULE_1__/* .generateDailyReport */ .jl)(sendSlackAfterCommit
+            ? {
+                ...config,
+                deferSlackNotification: true
+            }
+            : config);
         _actions_core__WEBPACK_IMPORTED_MODULE_0__.setOutput("report-path", result.reportPath);
         _actions_core__WEBPACK_IMPORTED_MODULE_0__.setOutput("report-markdown", result.reportMarkdown);
         if (config.commitReport) {
@@ -36262,12 +36268,23 @@ async function main() {
                 reportDate: config.reportDate
             });
         }
+        if (sendSlackAfterCommit) {
+            try {
+                await (0,_gitppou_core__WEBPACK_IMPORTED_MODULE_1__/* .sendSlackNotification */ .g4)(config.slackWebhookUrl, result.slackSummary);
+            }
+            catch (error) {
+                _actions_core__WEBPACK_IMPORTED_MODULE_0__.warning(`Slack notification failed. ${formatError(error)}`);
+            }
+        }
     }
     catch (error) {
         _actions_core__WEBPACK_IMPORTED_MODULE_0__.setFailed(error instanceof Error ? error.message : String(error));
     }
 }
 await main();
+function formatError(error) {
+    return error instanceof Error ? error.message : String(error);
+}
 
 __webpack_async_result__();
 } catch(e) { __webpack_async_result__(e); } }, 1);
@@ -36281,10 +36298,11 @@ __webpack_async_result__();
 // EXPORTS
 __nccwpck_require__.d(__webpack_exports__, {
   dt: () => (/* reexport */ buildGitppouConfig),
-  jl: () => (/* reexport */ generateDailyReport)
+  jl: () => (/* reexport */ generateDailyReport),
+  g4: () => (/* reexport */ sendSlackNotification)
 });
 
-// UNUSED EXPORTS: DEFAULT_LLM_MAX_INPUT_CHARS, DEFAULT_LLM_MODEL, DEFAULT_LLM_PROVIDER, DEFAULT_LLM_STYLE, DEFAULT_REPORT_LANGUAGE, DEFAULT_REPORT_TIMEZONE, assertValidDateString, assertValidTimeZone, buildReportPath, extractIssueKeys, fetchBacklogActivities, fetchGitHubActivities, formatDateInTimeZone, generateSlackSummary, getReportDateRange, groupActivitiesByIssueKey, isOnReportDate, normalizeActivities, parseCommaSeparatedList, parseGitHubRepoSpecString, parseLlmProvider, parseLlmStyle, parseReportLanguage, resolveGitHubTokenForOwner, resolveReportDate, sendSlackNotification
+// UNUSED EXPORTS: DEFAULT_LLM_MAX_INPUT_CHARS, DEFAULT_LLM_MODEL, DEFAULT_LLM_PROVIDER, DEFAULT_LLM_STYLE, DEFAULT_REPORT_LANGUAGE, DEFAULT_REPORT_TIMEZONE, assertValidDateString, assertValidTimeZone, buildReportPath, extractIssueKeys, fetchBacklogActivities, fetchGitHubActivities, formatDateInTimeZone, generateSlackSummary, getReportDateRange, groupActivitiesByIssueKey, isOnReportDate, normalizeActivities, parseCommaSeparatedList, parseGitHubRepoSpecString, parseLlmProvider, parseLlmStyle, parseReportLanguage, resolveGitHubTokenForOwner, resolveReportDate
 
 ;// CONCATENATED MODULE: ../core/dist/config.js
 const DEFAULT_REPORT_LANGUAGE = "en";
@@ -42459,24 +42477,45 @@ async function refineWithGitHubModels({ config, templateDraft, activities, group
         templateDraft,
         evidenceJson: truncate(evidenceJson, config.llmMaxInputChars)
     });
+    return chatWithGitHubModels({
+        config,
+        prompt,
+        maxTokens: config.llmStyle === "detailed" ? 1800 : 1200,
+        temperature: config.llmStyle === "detailed" ? 0.2 : 0.1
+    });
+}
+async function summarizeSlackWithGitHubModels({ config, reportMarkdown }) {
+    const prompt = buildSlackSummaryPrompt({
+        date: config.reportDate,
+        language: config.reportLanguage,
+        reportMarkdown: truncate(reportMarkdown, Math.min(config.llmMaxInputChars, 12000))
+    });
+    return chatWithGitHubModels({
+        config,
+        prompt,
+        maxTokens: config.reportLanguage === "ja" ? 240 : 180,
+        temperature: 0.1
+    });
+}
+async function chatWithGitHubModels(input) {
     const response = await fetch(GITHUB_MODELS_ENDPOINT, {
         method: "POST",
         headers: {
             Accept: "application/vnd.github+json",
-            Authorization: `Bearer ${config.githubToken}`,
+            Authorization: `Bearer ${input.config.githubToken}`,
             "Content-Type": "application/json",
             "X-GitHub-Api-Version": GITHUB_API_VERSION
         },
         body: JSON.stringify({
-            model: config.llmModel,
+            model: input.config.llmModel,
             messages: [
                 {
                     role: "user",
-                    content: prompt
+                    content: input.prompt
                 }
             ],
-            temperature: config.llmStyle === "detailed" ? 0.2 : 0.1,
-            max_tokens: config.llmStyle === "detailed" ? 1800 : 1200
+            temperature: input.temperature,
+            max_tokens: input.maxTokens
         })
     });
     if (!response.ok) {
@@ -42564,6 +42603,42 @@ ${input.templateDraft}
 
 User-action evidence and context:
 ${input.evidenceJson}`;
+}
+function buildSlackSummaryPrompt(input) {
+    if (input.language === "ja") {
+        return `以下の日報本文をSlack通知用に日本語で要約してください。
+
+ルール:
+- 1段落だけで書く
+- 箇条書きにしない
+- 120〜220字程度に収める
+- リンクやURLは書かない
+- 事実にないことは書かない
+- 本日対応したこと、進捗、明日やることの要点を自然な文章でまとめる
+- 詳細は別途リンクされる前提で、細かい活動を列挙しない
+
+日付:
+${input.date}
+
+日報本文:
+${input.reportMarkdown}`;
+    }
+    return `Summarize the following daily report for a Slack notification.
+
+Rules:
+- Write exactly one paragraph.
+- Do not use bullets.
+- Keep it around 60-100 words.
+- Do not include links or URLs.
+- Do not add unsupported facts.
+- Summarize the key work completed today, progress, and next actions in natural prose.
+- Assume the full report is linked separately, so do not enumerate every activity.
+
+Date:
+${input.date}
+
+Daily report:
+${input.reportMarkdown}`;
 }
 function commentContextForGroup(activities, groupActivities) {
     const issueKey = groupActivities.find((activity) => activity.issueKey)?.issueKey;
@@ -42720,59 +42795,103 @@ function normalize_escapeRegExp(value) {
 }
 
 ;// CONCATENATED MODULE: ../core/dist/slack.js
-function generateSlackSummary(config, groups, reportPath) {
+function generateSlackSummary(config, reportPath, reportMarkdown, summaryText) {
     const isJapanese = config.reportLanguage === "ja";
     const title = isJapanese ? `日報 ${config.reportDate}` : `Daily Report - ${config.reportDate}`;
-    const workLabel = isJapanese ? "本日対応:" : "Work:";
-    const blockerLabel = isJapanese ? "課題・相談:" : "Blockers / Questions:";
-    const runLabel = isJapanese ? "実行:" : "Run:";
-    const detailsLabel = isJapanese ? "詳細:" : "Details:";
-    const runLines = githubActionsContextLines(config.githubActionsContext, config.reportLanguage);
-    const workItems = groups.slice(0, 8).map((group) => `- ${formatGroup(group)}`);
-    const blockers = groups
-        .flatMap((group) => group.activities
-        .filter((activity) => /blocker|blocked|question|needs confirmation|確認|課題|相談|ブロック|未解決/i.test(`${activity.title}\n${activity.body ?? ""}`))
-        .map((activity) => `- ${activity.issueKey ? `${activity.issueKey} ` : ""}${activity.title}`))
-        .slice(0, 5);
+    const detailsLabel = isJapanese ? "詳細" : "Details";
+    const contextLine = githubActionsContextLine(config.githubActionsContext);
+    const details = reportDetails(reportPath, config.githubActionsContext);
+    const summary = cleanSummaryText(summaryText) ?? localReportSummary(reportMarkdown, config.reportLanguage);
     const lines = [
         title,
+        ...(contextLine ? [contextLine] : []),
+        `${detailsLabel}: ${details}`,
         "",
-        ...(runLines.length > 0 ? [runLabel, ...runLines, ""] : []),
-        workLabel,
-        ...(workItems.length > 0 ? workItems : [isJapanese ? "- 活動なし" : "- No activity found"]),
-        "",
-        blockerLabel,
-        ...(blockers.length > 0 ? blockers : [isJapanese ? "- なし" : "- None found"]),
-        "",
-        detailsLabel,
-        reportPath
+        summary
     ];
     return slack_truncate(lines.join("\n"), 3500);
 }
-function githubActionsContextLines(context, language) {
+function githubActionsContextLine(context) {
     if (!context) {
-        return [];
-    }
-    const isJapanese = language === "ja";
-    const runUrl = githubActionsRunUrl(context);
-    return [
-        context.actor ? `- ${isJapanese ? "実行者" : "Actor"}: ${context.actor}` : undefined,
-        context.workflow || context.runNumber
-            ? `- Workflow: ${[context.workflow, context.runNumber ? `#${context.runNumber}` : undefined].filter(Boolean).join(" ")}`
-            : undefined,
-        context.repository || context.refName
-            ? `- Repository: ${[context.repository, context.refName ? `(${context.refName})` : undefined].filter(Boolean).join(" ")}`
-            : undefined,
-        context.eventName ? `- Event: ${context.eventName}` : undefined,
-        runUrl ? `- URL: ${runUrl}` : undefined
-    ].filter((line) => Boolean(line));
-}
-function githubActionsRunUrl(context) {
-    if (!context.repository || !context.runId) {
         return undefined;
     }
+    const workflow = [context.workflow, context.runNumber ? `#${context.runNumber}` : undefined].filter(Boolean).join(" ");
+    const repository = [context.repository, context.refName ? `(${context.refName})` : undefined].filter(Boolean).join(" ");
+    const actor = context.actor ? `by ${context.actor}` : undefined;
+    const parts = [actor, workflow || undefined, repository || undefined].filter((part) => Boolean(part));
+    return parts.length > 0 ? parts.join(" / ") : undefined;
+}
+function reportDetails(reportPath, context) {
+    const url = githubReportFileUrl(reportPath, context);
+    return url ? `<${url}|${reportPath}>` : reportPath;
+}
+function githubReportFileUrl(reportPath, context) {
+    if (!context?.repository || !context.refName) {
+        return undefined;
+    }
+    const reportFilePath = reportPath.replace(/\\/g, "/").replace(/^\/+/, "");
     const serverUrl = context.serverUrl ?? "https://github.com";
-    return `${serverUrl.replace(/\/+$/g, "")}/${context.repository}/actions/runs/${context.runId}`;
+    return `${serverUrl.replace(/\/+$/g, "")}/${context.repository}/blob/${context.refName}/${encodePath(reportFilePath)}`;
+}
+function encodePath(value) {
+    return value.split("/").map(encodeURIComponent).join("/");
+}
+function cleanSummaryText(value) {
+    const compact = value?.replace(/\s+/g, " ").trim();
+    return compact || undefined;
+}
+function localReportSummary(reportMarkdown, language) {
+    const workItems = sectionHeadings(reportMarkdown, language === "ja" ? "本日対応したこと" : "Work completed today")
+        .filter((heading) => heading !== "Unlinked")
+        .slice(0, 3);
+    const nextItems = nextActionItems(reportMarkdown, language).slice(0, 2);
+    if (language === "ja") {
+        if (workItems.length === 0) {
+            return "本日のユーザー行動は見つかりませんでした。詳細はリンク先の日報を確認してください。";
+        }
+        const next = nextItems.length > 0 ? `明日は${joinJapanese(nextItems)}を確認・対応する予定です。` : "";
+        return `本日は${joinJapanese(workItems)}を中心に対応しました。${next}`;
+    }
+    if (workItems.length === 0) {
+        return "No user activity was found for this date. See the linked report for details.";
+    }
+    const next = nextItems.length > 0 ? ` Next actions focus on ${joinEnglish(nextItems)}.` : "";
+    return `Worked mainly on ${joinEnglish(workItems)}.${next}`;
+}
+function sectionHeadings(reportMarkdown, sectionTitle) {
+    return sectionLines(reportMarkdown, sectionTitle)
+        .filter((line) => /^###\s+/.test(line))
+        .map((line) => line.replace(/^###\s+/, "").trim())
+        .filter(Boolean);
+}
+function nextActionItems(reportMarkdown, language) {
+    const sectionTitle = language === "ja" ? "明日やること" : "Next actions";
+    return sectionLines(reportMarkdown, sectionTitle)
+        .filter((line) => /^-\s+/.test(line))
+        .map((line) => line.replace(/^-\s+/, "").replace(/[:：].*$/, "").trim())
+        .filter(Boolean);
+}
+function sectionLines(reportMarkdown, sectionTitle) {
+    const lines = reportMarkdown.split(/\r?\n/);
+    const start = lines.findIndex((line) => line.trim() === `## ${sectionTitle}`);
+    if (start < 0) {
+        return [];
+    }
+    const rest = lines.slice(start + 1);
+    const end = rest.findIndex((line) => /^##\s+/.test(line));
+    return end < 0 ? rest : rest.slice(0, end);
+}
+function joinJapanese(items) {
+    if (items.length <= 1) {
+        return items[0] ?? "";
+    }
+    return `${items.slice(0, -1).join("、")}、${items[items.length - 1]}`;
+}
+function joinEnglish(items) {
+    if (items.length <= 1) {
+        return items[0] ?? "";
+    }
+    return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
 }
 async function sendSlackNotification(webhookUrl, text) {
     if (!webhookUrl) {
@@ -42789,12 +42908,6 @@ async function sendSlackNotification(webhookUrl, text) {
     if (!response.ok) {
         throw new Error(`Slack webhook request failed with status ${response.status}.`);
     }
-}
-function formatGroup(group) {
-    if (group.issueKey === "Unlinked") {
-        return "Unlinked";
-    }
-    return group.title ? `${group.issueKey} ${group.title}` : group.issueKey;
 }
 function slack_truncate(value, maxChars) {
     if (value.length <= maxChars) {
@@ -42835,8 +42948,9 @@ async function generateDailyReport(config) {
     }
     const reportPath = buildReportPath(config.reportDir, config.reportDate);
     await saveReport(reportPath, reportMarkdown);
-    const slackSummary = generateSlackSummary(config, actionGroups, reportPath);
-    if (config.slackNotify) {
+    const slackSummaryText = await generateSlackSummaryText(config, reportMarkdown);
+    const slackSummary = generateSlackSummary(config, reportPath, reportMarkdown, slackSummaryText);
+    if (config.slackNotify && !config.deferSlackNotification) {
         try {
             await sendSlackNotification(config.slackWebhookUrl, slackSummary);
         }
@@ -42849,6 +42963,21 @@ async function generateDailyReport(config) {
         reportMarkdown,
         slackSummary
     };
+}
+async function generateSlackSummaryText(config, reportMarkdown) {
+    if (!config.slackNotify || config.llmProvider !== "github-models") {
+        return undefined;
+    }
+    try {
+        return await summarizeSlackWithGitHubModels({
+            config,
+            reportMarkdown
+        });
+    }
+    catch (error) {
+        console.warn(`Gitppou warning: GitHub Models Slack summary failed; using local summary. ${formatError(error)}`);
+        return undefined;
+    }
 }
 async function fetchActivities(config) {
     const [githubResult, backlogResult] = await Promise.allSettled([

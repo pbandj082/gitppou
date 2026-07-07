@@ -24,6 +24,7 @@ When `llm.provider` is `github-models`, Gitppou sends:
 - Backlog issue metadata included in those activities, such as issue type and category.
 - Assigned Backlog issue context used by the progress gantt chart.
 - Recent Backlog discussion context attached to each user comment, used to infer what a reply or confirmation refers to.
+- The final generated report Markdown, when creating the Slack notification summary.
 
 The data is capped by `llm.maxInputChars`.
 

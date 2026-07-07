@@ -2,7 +2,12 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fetchBacklogActivities } from "./backlog.js";
 import { fetchGitHubActivities } from "./github.js";
-import { applyTemplateProvider, generateTemplateReport, refineWithGitHubModels } from "./llm/index.js";
+import {
+  applyTemplateProvider,
+  generateTemplateReport,
+  refineWithGitHubModels,
+  summarizeSlackWithGitHubModels
+} from "./llm/index.js";
 import { groupActivitiesByIssueKey, normalizeActivities } from "./normalize.js";
 import { filterGroupsByUserActions } from "./report-evidence.js";
 import { generateSlackSummary, sendSlackNotification } from "./slack.js";
@@ -33,8 +38,9 @@ export async function generateDailyReport(config: GitppouConfig): Promise<Report
   const reportPath = buildReportPath(config.reportDir, config.reportDate);
   await saveReport(reportPath, reportMarkdown);
 
-  const slackSummary = generateSlackSummary(config, actionGroups, reportPath);
-  if (config.slackNotify) {
+  const slackSummaryText = await generateSlackSummaryText(config, reportMarkdown);
+  const slackSummary = generateSlackSummary(config, reportPath, reportMarkdown, slackSummaryText);
+  if (config.slackNotify && !config.deferSlackNotification) {
     try {
       await sendSlackNotification(config.slackWebhookUrl, slackSummary);
     } catch (error) {
@@ -47,6 +53,25 @@ export async function generateDailyReport(config: GitppouConfig): Promise<Report
     reportMarkdown,
     slackSummary
   };
+}
+
+async function generateSlackSummaryText(
+  config: GitppouConfig,
+  reportMarkdown: string
+): Promise<string | undefined> {
+  if (!config.slackNotify || config.llmProvider !== "github-models") {
+    return undefined;
+  }
+
+  try {
+    return await summarizeSlackWithGitHubModels({
+      config,
+      reportMarkdown
+    });
+  } catch (error) {
+    console.warn(`Gitppou warning: GitHub Models Slack summary failed; using local summary. ${formatError(error)}`);
+    return undefined;
+  }
 }
 
 async function fetchActivities(config: GitppouConfig): Promise<[NormalizedActivity[], NormalizedActivity[]]> {

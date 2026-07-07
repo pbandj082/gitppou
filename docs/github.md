@@ -62,11 +62,13 @@ If repositories span multiple private users or organizations, map each owner to 
 github:
   tokenEnv: GITHUB_TOKEN
   tokens:
-    your-name: GITHUB_TOKEN_PERSONAL
-    org-a: GITHUB_TOKEN_ORG_A
-    org-b: GITHUB_TOKEN_ORG_B
+    your-name: GITPPOU_TOKEN_PERSONAL
+    org-a: GITPPOU_TOKEN_ORG_A
+    org-b: GITPPOU_TOKEN_ORG_B
   repos:
     - your-name/private-repo
     - org-a/app
     - org-b/api
 ```
+
+GitHub does not allow custom repository secret names that start with `GITHUB_`. Use the built-in `GITHUB_TOKEN` for the workflow repository, and use another prefix such as `GITPPOU_TOKEN_` for owner-specific personal access tokens.
