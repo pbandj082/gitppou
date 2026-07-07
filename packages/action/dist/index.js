@@ -41591,7 +41591,11 @@ async function fetchPullRequests(octokit, repo, config) {
     ]);
     const mergedByUser = await filterMergedByUser(octokit, repo, merged, config.githubUsername);
     const items = mergeSearchItems([...created, ...updated, ...mergedByUser]);
-    return items.map((item) => {
+    const itemsWithStats = await Promise.all(items.map(async (item) => ({
+        item,
+        stats: await fetchPullRequestStats(octokit, repo, item.number)
+    })));
+    return itemsWithStats.map(({ item, stats }) => {
         const activity = {
             source: "github",
             kind: "pull_request",
@@ -41602,7 +41606,10 @@ async function fetchPullRequests(octokit, repo, config) {
             url: item.html_url,
             metadata: {
                 number: item.number,
-                state: item.state
+                state: item.state,
+                additions: stats.additions,
+                deletions: stats.deletions,
+                changedFiles: stats.changedFiles
             }
         };
         if (item.body) {
@@ -41613,6 +41620,18 @@ async function fetchPullRequests(octokit, repo, config) {
         }
         return activity;
     });
+}
+async function fetchPullRequestStats(octokit, repo, pullNumber) {
+    const response = await octokit.pulls.get({
+        owner: repo.owner,
+        repo: repo.repo,
+        pull_number: pullNumber
+    });
+    return {
+        additions: response.data.additions,
+        deletions: response.data.deletions,
+        changedFiles: response.data.changed_files
+    };
 }
 async function github_fetchIssueComments(octokit, repo, config) {
     const { since } = getReportDateRange(config.reportDate, config.reportTimezone);
@@ -41900,7 +41919,7 @@ function describeActivity(activity, language, context = {}) {
             case "commit":
                 return `${prefix}commitを作成: ${title}`;
             case "pull_request":
-                return `${prefix}PRを更新: ${title}`;
+                return `${prefix}PRを更新: ${title}${pullRequestStatsSuffix(activity, "ja")}`;
             case "review":
                 return `${prefix}PRレビューを実施: ${title}`;
             case "comment":
@@ -41921,7 +41940,7 @@ function describeActivity(activity, language, context = {}) {
         case "commit":
             return `${prefix}Committed: ${title}`;
         case "pull_request":
-            return `${prefix}Updated pull request: ${title}`;
+            return `${prefix}Updated pull request: ${title}${pullRequestStatsSuffix(activity, "en")}`;
         case "review":
             return `${prefix}Reviewed pull request: ${title}`;
         case "comment":
@@ -42300,6 +42319,26 @@ function statusSuffix(activity, label = "status") {
     const status = typeof activity.metadata?.status === "string" ? activity.metadata.status : undefined;
     return status ? ` (${label}: ${status})` : "";
 }
+function pullRequestStatsSuffix(activity, language) {
+    const additions = metadataNumber(activity, "additions");
+    const deletions = metadataNumber(activity, "deletions");
+    const changedFiles = metadataNumber(activity, "changedFiles");
+    if (additions === undefined && deletions === undefined && changedFiles === undefined) {
+        return "";
+    }
+    const diff = [
+        additions === undefined ? undefined : `+${additions}`,
+        deletions === undefined ? undefined : `-${deletions}`
+    ].filter((value) => Boolean(value)).join(" / ");
+    const files = changedFiles === undefined
+        ? undefined
+        : `${changedFiles} files`;
+    const parts = [diff || undefined, files].filter((value) => Boolean(value));
+    if (parts.length === 0) {
+        return "";
+    }
+    return language === "ja" ? `（${parts.join("、")}）` : ` (${parts.join(", ")})`;
+}
 function statusChangeText(activity, language) {
     const originalValue = metadataString(activity, "originalValue");
     const newValue = metadataString(activity, "newValue");
@@ -42323,6 +42362,10 @@ function statusChangeText(activity, language) {
 function metadataString(activity, key) {
     const value = activity.metadata?.[key];
     return typeof value === "string" && value.trim() !== "" ? value : undefined;
+}
+function metadataNumber(activity, key) {
+    const value = activity.metadata?.[key];
+    return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 function metadataDate(activity, key) {
     return metadataString(activity, key)?.match(/^\d{4}-\d{2}-\d{2}/)?.[0];
@@ -42449,6 +42492,7 @@ function buildPrompt(input) {
 - comment_contextから対象が分かる場合は、「この課題について確認コメント」のような汎用表現のままにしない
 - ただしcomment_contextに根拠がない対象や意図は推測で書かない
 - 種別、カテゴリーなどのmetadataは文脈として使い、ユーザー本人の作業として扱わない
+- GitHub PRのmetadata.additions/deletions/changedFilesはPR全体の差分サマリとして扱い、テンプレートに表示されている場合は維持する
 - Backlogの「issue」「assigned_issue」「due_issue」は、それだけではユーザー本人の作業として扱わない
 - テンプレート日報の進捗にMermaid ganttが含まれる場合は、事実と矛盾しない範囲で維持する
 - 明日やることは、レビュー待ち、処理中、本日が期限の課題から候補として書く
@@ -42485,6 +42529,7 @@ Rules:
 - If comment_context identifies the target, do not keep generic phrasing such as "commented on this issue".
 - Do not infer a target or intent that is not supported by comment_context.
 - Use metadata such as issue type and categories only as context. Do not present metadata as user work.
+- Treat GitHub PR metadata.additions/deletions/changedFiles as whole-PR diff stats, and preserve them when the template displays them.
 - Do not treat Backlog "issue", "assigned_issue", or "due_issue" entries as user work by themselves.
 - If the template report includes a Mermaid gantt chart in the progress section, preserve it unless it conflicts with the evidence.
 - For next actions, use review-waiting, in-progress, or issues due today as candidates.

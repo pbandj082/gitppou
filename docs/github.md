@@ -18,6 +18,7 @@ The v1 implementation collects stable activity signals:
 - Pull requests created by the user on the report date.
 - Pull requests involving the user and updated on the report date.
 - Pull requests merged by the user on the report date when available.
+- Pull request diff stats, shown as additions, deletions, and changed files for the whole PR.
 - Issue or PR comments by the user on the report date.
 - PR reviews by the user on the report date.
 

@@ -311,7 +311,14 @@ async function fetchPullRequests(
   const mergedByUser = await filterMergedByUser(octokit, repo, merged, config.githubUsername);
   const items = mergeSearchItems([...created, ...updated, ...mergedByUser]);
 
-  return items.map((item) => {
+  const itemsWithStats = await Promise.all(
+    items.map(async (item) => ({
+      item,
+      stats: await fetchPullRequestStats(octokit, repo, item.number)
+    }))
+  );
+
+  return itemsWithStats.map(({ item, stats }) => {
     const activity: NormalizedActivity = {
       source: "github",
       kind: "pull_request",
@@ -322,7 +329,10 @@ async function fetchPullRequests(
       url: item.html_url,
       metadata: {
         number: item.number,
-        state: item.state
+        state: item.state,
+        additions: stats.additions,
+        deletions: stats.deletions,
+        changedFiles: stats.changedFiles
       }
     };
 
@@ -336,6 +346,20 @@ async function fetchPullRequests(
 
     return activity;
   });
+}
+
+async function fetchPullRequestStats(octokit: Octokit, repo: RepoRef, pullNumber: number) {
+  const response = await octokit.pulls.get({
+    owner: repo.owner,
+    repo: repo.repo,
+    pull_number: pullNumber
+  });
+
+  return {
+    additions: response.data.additions,
+    deletions: response.data.deletions,
+    changedFiles: response.data.changed_files
+  };
 }
 
 async function fetchIssueComments(

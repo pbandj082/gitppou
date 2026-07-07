@@ -142,7 +142,7 @@ function describeActivity(
       case "commit":
         return `${prefix}commitを作成: ${title}`;
       case "pull_request":
-        return `${prefix}PRを更新: ${title}`;
+        return `${prefix}PRを更新: ${title}${pullRequestStatsSuffix(activity, "ja")}`;
       case "review":
         return `${prefix}PRレビューを実施: ${title}`;
       case "comment":
@@ -164,7 +164,7 @@ function describeActivity(
     case "commit":
       return `${prefix}Committed: ${title}`;
     case "pull_request":
-      return `${prefix}Updated pull request: ${title}`;
+      return `${prefix}Updated pull request: ${title}${pullRequestStatsSuffix(activity, "en")}`;
     case "review":
       return `${prefix}Reviewed pull request: ${title}`;
     case "comment":
@@ -684,6 +684,34 @@ function statusSuffix(activity: NormalizedActivity, label = "status"): string {
   return status ? ` (${label}: ${status})` : "";
 }
 
+function pullRequestStatsSuffix(
+  activity: NormalizedActivity,
+  language: GitppouConfig["reportLanguage"]
+): string {
+  const additions = metadataNumber(activity, "additions");
+  const deletions = metadataNumber(activity, "deletions");
+  const changedFiles = metadataNumber(activity, "changedFiles");
+
+  if (additions === undefined && deletions === undefined && changedFiles === undefined) {
+    return "";
+  }
+
+  const diff = [
+    additions === undefined ? undefined : `+${additions}`,
+    deletions === undefined ? undefined : `-${deletions}`
+  ].filter((value): value is string => Boolean(value)).join(" / ");
+  const files = changedFiles === undefined
+    ? undefined
+    : `${changedFiles} files`;
+  const parts = [diff || undefined, files].filter((value): value is string => Boolean(value));
+
+  if (parts.length === 0) {
+    return "";
+  }
+
+  return language === "ja" ? `（${parts.join("、")}）` : ` (${parts.join(", ")})`;
+}
+
 function statusChangeText(activity: NormalizedActivity, language: GitppouConfig["reportLanguage"]): string {
   const originalValue = metadataString(activity, "originalValue");
   const newValue = metadataString(activity, "newValue");
@@ -714,6 +742,11 @@ function statusChangeText(activity: NormalizedActivity, language: GitppouConfig[
 function metadataString(activity: NormalizedActivity, key: string): string | undefined {
   const value = activity.metadata?.[key];
   return typeof value === "string" && value.trim() !== "" ? value : undefined;
+}
+
+function metadataNumber(activity: NormalizedActivity, key: string): number | undefined {
+  const value = activity.metadata?.[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
 function metadataDate(activity: NormalizedActivity, key: string): string | undefined {

@@ -110,6 +110,7 @@ function buildPrompt(input: {
 - comment_contextから対象が分かる場合は、「この課題について確認コメント」のような汎用表現のままにしない
 - ただしcomment_contextに根拠がない対象や意図は推測で書かない
 - 種別、カテゴリーなどのmetadataは文脈として使い、ユーザー本人の作業として扱わない
+- GitHub PRのmetadata.additions/deletions/changedFilesはPR全体の差分サマリとして扱い、テンプレートに表示されている場合は維持する
 - Backlogの「issue」「assigned_issue」「due_issue」は、それだけではユーザー本人の作業として扱わない
 - テンプレート日報の進捗にMermaid ganttが含まれる場合は、事実と矛盾しない範囲で維持する
 - 明日やることは、レビュー待ち、処理中、本日が期限の課題から候補として書く
@@ -147,6 +148,7 @@ Rules:
 - If comment_context identifies the target, do not keep generic phrasing such as "commented on this issue".
 - Do not infer a target or intent that is not supported by comment_context.
 - Use metadata such as issue type and categories only as context. Do not present metadata as user work.
+- Treat GitHub PR metadata.additions/deletions/changedFiles as whole-PR diff stats, and preserve them when the template displays them.
 - Do not treat Backlog "issue", "assigned_issue", or "due_issue" entries as user work by themselves.
 - If the template report includes a Mermaid gantt chart in the progress section, preserve it unless it conflicts with the evidence.
 - For next actions, use review-waiting, in-progress, or issues due today as candidates.

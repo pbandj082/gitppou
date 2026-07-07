@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { parseGitHubRepoSpecString, resolveGitHubTokenForOwner } from "../github.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { fetchGitHubActivities, parseGitHubRepoSpecString, resolveGitHubTokenForOwner } from "../github.js";
 import type { GitppouConfig } from "../types.js";
 
 const baseConfig: GitppouConfig = {
@@ -24,6 +24,10 @@ const baseConfig: GitppouConfig = {
   llmMaxInputChars: 20_000,
   llmStyle: "concise"
 };
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe("resolveGitHubTokenForOwner", () => {
   it("uses an owner-specific token when configured", () => {
@@ -58,6 +62,94 @@ describe("resolveGitHubTokenForOwner", () => {
     expect(resolveGitHubTokenForOwner(baseConfig, "org-a")).toBe("default-token");
   });
 });
+
+describe("fetchGitHubActivities", () => {
+  it("includes pull request diff stats", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        const url = new URL(String(input));
+
+        if (url.pathname === "/repos/owner/repo/commits") {
+          return jsonResponse([]);
+        }
+
+        if (url.pathname === "/repos/owner/repo/issues/comments") {
+          return jsonResponse([]);
+        }
+
+        if (url.pathname === "/search/issues") {
+          const query = url.searchParams.get("q") ?? "";
+          if (query.includes("is:pr") && query.includes("involves:octocat") && query.includes("updated:2026-07-06")) {
+            return jsonResponse({
+              total_count: 1,
+              incomplete_results: false,
+              items: [
+                {
+                  number: 12,
+                  title: "APP-1 Update login flow",
+                  state: "open",
+                  html_url: "https://github.com/owner/repo/pull/12",
+                  created_at: "2026-07-05T10:00:00Z",
+                  updated_at: "2026-07-06T10:00:00Z",
+                  body: "APP-1",
+                  user: {
+                    login: "octocat"
+                  }
+                }
+              ]
+            });
+          }
+
+          return jsonResponse({
+            total_count: 0,
+            incomplete_results: false,
+            items: []
+          });
+        }
+
+        if (url.pathname === "/repos/owner/repo/pulls/12") {
+          return jsonResponse({
+            additions: 120,
+            deletions: 32,
+            changed_files: 4
+          });
+        }
+
+        return jsonResponse({}, 404);
+      })
+    );
+
+    await expect(
+      fetchGitHubActivities({
+        ...baseConfig,
+        githubRepos: ["owner/repo"]
+      })
+    ).resolves.toEqual([
+      expect.objectContaining({
+        kind: "pull_request",
+        metadata: expect.objectContaining({
+          additions: 120,
+          deletions: 32,
+          changedFiles: 4
+        })
+      })
+    ]);
+  });
+});
+
+function jsonResponse(body: unknown, status = 200): Response {
+  const response = new Response(JSON.stringify(body), {
+    status,
+    headers: {
+      "Content-Type": "application/json"
+    }
+  });
+  Object.defineProperty(response, "url", {
+    value: "https://api.github.com/"
+  });
+  return response;
+}
 
 describe("parseGitHubRepoSpecString", () => {
   it("keeps explicit owner/repo entries", () => {
