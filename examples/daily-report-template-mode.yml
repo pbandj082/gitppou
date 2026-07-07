@@ -21,6 +21,6 @@ jobs:
           config: gitppou.yml
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # GITHUB_TOKEN_OWNER: ${{ secrets.REPORT_GITHUB_TOKEN_OWNER }}
+          # GITPPOU_TOKEN_OWNER: ${{ secrets.GITPPOU_TOKEN_OWNER }}
           BACKLOG_API_KEY: ${{ secrets.BACKLOG_API_KEY }}
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

@@ -3,8 +3,8 @@ github:
   tokenEnv: GITHUB_TOKEN
   # Use owner-specific token env vars when repos span private user/org owners.
   # tokens:
-  #   your-name: GITHUB_TOKEN_PERSONAL
-  #   your-org: GITHUB_TOKEN_YOUR_ORG
+  #   your-name: GITPPOU_TOKEN_PERSONAL
+  #   your-org: GITPPOU_TOKEN_YOUR_ORG
   repos:
     - owner/repo
     # Fetch the top 20 recently pushed repositories for an owner.

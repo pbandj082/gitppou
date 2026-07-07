@@ -3,7 +3,7 @@ import { buildPreviewConfig, loadPreviewEnv } from "../config.js";
 
 const env = {
   GITHUB_TOKEN: "github-token",
-  GITHUB_TOKEN_ORG_A: "org-a-token",
+  GITPPOU_TOKEN_ORG_A: "org-a-token",
   BACKLOG_API_KEY: "backlog-key",
   SLACK_WEBHOOK_URL: "https://example.com/slack"
 };
@@ -17,7 +17,7 @@ describe("buildPreviewConfig", () => {
           repos: ["owner/repo"],
           tokenEnv: "GITHUB_TOKEN",
           tokens: {
-            "org-a": "GITHUB_TOKEN_ORG_A"
+            "org-a": "GITPPOU_TOKEN_ORG_A"
           }
         },
         backlog: {

@@ -130,9 +130,9 @@ github:
   username: your-name
   tokenEnv: GITHUB_TOKEN
   tokens:
-    your-name: GITHUB_TOKEN_PERSONAL
-    org-a: GITHUB_TOKEN_ORG_A
-    org-b: GITHUB_TOKEN_ORG_B
+    your-name: GITPPOU_TOKEN_PERSONAL
+    org-a: GITPPOU_TOKEN_ORG_A
+    org-b: GITPPOU_TOKEN_ORG_B
   repos:
     - your-name/private-repo
     - org-a/app
@@ -142,10 +142,12 @@ github:
 ```yaml
 env:
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  GITHUB_TOKEN_PERSONAL: ${{ secrets.REPORT_GITHUB_TOKEN_PERSONAL }}
-  GITHUB_TOKEN_ORG_A: ${{ secrets.REPORT_GITHUB_TOKEN_ORG_A }}
-  GITHUB_TOKEN_ORG_B: ${{ secrets.REPORT_GITHUB_TOKEN_ORG_B }}
+  GITPPOU_TOKEN_PERSONAL: ${{ secrets.GITPPOU_TOKEN_PERSONAL }}
+  GITPPOU_TOKEN_ORG_A: ${{ secrets.GITPPOU_TOKEN_ORG_A }}
+  GITPPOU_TOKEN_ORG_B: ${{ secrets.GITPPOU_TOKEN_ORG_B }}
 ```
+
+GitHub does not allow custom repository secret names that start with `GITHUB_`. Use the built-in `GITHUB_TOKEN` only for `github.tokenEnv`, and use another prefix such as `GITPPOU_TOKEN_` for owner-specific tokens.
 
 ## Inputs
 
