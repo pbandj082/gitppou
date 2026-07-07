@@ -13,6 +13,8 @@ github:
     #     sort: pushed
 
 backlog:
+  # Set enabled: false to generate reports from GitHub only.
+  # enabled: false
   # Optional numeric Backlog user id. Omit to use the API key owner.
   # userId: "123456"
   spaces:

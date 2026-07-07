@@ -83,7 +83,7 @@ function buildPrompt(input: {
 - Backlog課題キーを優先して整理する
 - GitHubのcommit/PRとBacklog課題が同じ課題キーを含む場合は同じ項目にまとめる
 - 課題・相談事項は、コメントやステータスから読み取れる範囲でのみ書く
-- 明日やることは、レビュー待ち、処理中、期限が近い課題から候補として書く
+- 明日やることは、レビュー待ち、処理中、本日が期限の課題から候補として書く
 - Markdownで出力する
 - 出力には日報本文のみを含める
 
@@ -108,7 +108,7 @@ Rules:
 - Group work by Backlog issue key when possible.
 - If GitHub commits/PRs and Backlog issues share the same issue key, merge them into the same section.
 - Write blockers/questions only when they are supported by comments, statuses, or issue data.
-- For next actions, use review-waiting, in-progress, or near-due issues as candidates.
+- For next actions, use review-waiting, in-progress, or issues due today as candidates.
 - Output Markdown only.
 - Output only the report body.
 

@@ -1,8 +1,12 @@
 import { isOnReportDate } from "./config.js";
 import type { BacklogSpaceConfig, GitppouConfig, NormalizedActivity } from "./types.js";
 
-type BacklogSpaceContext = BacklogSpaceConfig &
-  Pick<GitppouConfig, "backlogApiKey" | "backlogUserId" | "reportDate" | "reportTimezone">;
+type BacklogSpaceContext = BacklogSpaceConfig & {
+  backlogApiKey: string;
+  backlogUserId?: string;
+  reportDate: string;
+  reportTimezone: string;
+};
 
 type BacklogUser = {
   id: number;
@@ -53,11 +57,20 @@ type BacklogComment = {
 type QueryValue = string | number | boolean | readonly (string | number | boolean)[];
 
 export async function fetchBacklogActivities(config: GitppouConfig): Promise<NormalizedActivity[]> {
+  if (config.backlogSpaces.length === 0) {
+    return [];
+  }
+
+  if (!config.backlogApiKey) {
+    throw new Error("BACKLOG_API_KEY is required when Backlog is enabled.");
+  }
+
+  const backlogApiKey = config.backlogApiKey;
   const activitySets = await Promise.all(
     config.backlogSpaces.map((spaceConfig) =>
       fetchBacklogSpaceActivities({
         ...spaceConfig,
-        backlogApiKey: config.backlogApiKey,
+        backlogApiKey,
         ...(config.backlogUserId ? { backlogUserId: config.backlogUserId } : {}),
         reportDate: config.reportDate,
         reportTimezone: config.reportTimezone
@@ -137,7 +150,9 @@ async function fetchRelevantIssues(config: BacklogSpaceContext, projectIds: numb
   const assignedIssues = config.backlogUserId
     ? await backlogGet<BacklogIssue[]>(config, "/issues", {
         ...commonParams,
-        "assigneeId[]": [config.backlogUserId]
+        "assigneeId[]": [config.backlogUserId],
+        updatedSince: config.reportDate,
+        updatedUntil: config.reportDate
       })
     : [];
 
@@ -168,7 +183,7 @@ function issueToActivities(config: BacklogSpaceContext, issue: BacklogIssue): No
     dueDate: issue.dueDate ?? undefined
   });
 
-  if (isOnReportDate(issue.updated, config.reportDate, config.reportTimezone) || isAssignedToUser(config, issue)) {
+  if (isOnReportDate(issue.updated, config.reportDate, config.reportTimezone)) {
     activities.push({
       source: "backlog",
       kind: "issue",
@@ -183,7 +198,7 @@ function issueToActivities(config: BacklogSpaceContext, issue: BacklogIssue): No
     });
   }
 
-  if (issue.dueDate && issue.dueDate <= config.reportDate && isAssignedToUser(config, issue)) {
+  if (issue.dueDate === config.reportDate && isAssignedToUser(config, issue)) {
     activities.push({
       source: "backlog",
       kind: "due_issue",

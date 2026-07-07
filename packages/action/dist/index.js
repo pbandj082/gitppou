@@ -36438,6 +36438,7 @@ function buildGitppouConfig(rawConfig, options, env, now = new Date()) {
     const root = asObject(rawConfig, "config");
     const github = getSection(root, "github");
     const backlog = getSection(root, "backlog");
+    const hasBacklogSection = root.backlog !== undefined;
     const report = getSection(root, "report");
     const llm = getSection(root, "llm");
     const slack = getSection(root, "slack");
@@ -36449,12 +36450,12 @@ function buildGitppouConfig(rawConfig, options, env, now = new Date()) {
         getStringOrNumber(llm, "maxInputChars", "config.llm.maxInputChars") ??
         String(DEFAULT_LLM_MAX_INPUT_CHARS), "llm-max-input-chars");
     const slackNotify = options.slackNotify ?? getOptionalBoolean(slack, "notify", "config.slack.notify") ?? true;
+    const backlogEnabled = getOptionalBoolean(backlog, "enabled", "config.backlog.enabled") ?? hasBacklogSection;
     const config = {
         githubToken: requiredEnv(env, getString(github, "tokenEnv", "config.github.tokenEnv") || "GITHUB_TOKEN"),
         githubUsername: requiredString(github, "username", "config.github.username"),
         githubRepos: getGitHubRepoSpecs(github, "repos", "config.github.repos"),
-        backlogApiKey: requiredEnv(env, "BACKLOG_API_KEY"),
-        backlogSpaces: resolveBacklogSpaces(backlog),
+        backlogSpaces: backlogEnabled ? resolveBacklogSpaces(backlog) : [],
         reportDate,
         reportTimezone,
         reportLanguage: parseReportLanguage(options.reportLanguage ?? getString(report, "language", "config.report.language") ?? DEFAULT_REPORT_LANGUAGE),
@@ -36469,9 +36470,12 @@ function buildGitppouConfig(rawConfig, options, env, now = new Date()) {
     if (Object.keys(githubTokensByOwner).length > 0) {
         config.githubTokensByOwner = githubTokensByOwner;
     }
-    const backlogUserId = getString(backlog, "userId", "config.backlog.userId");
-    if (backlogUserId) {
-        config.backlogUserId = normalizeBacklogUserId(backlogUserId, "config.backlog.userId");
+    if (backlogEnabled) {
+        config.backlogApiKey = requiredEnv(env, "BACKLOG_API_KEY");
+        const backlogUserId = getString(backlog, "userId", "config.backlog.userId");
+        if (backlogUserId) {
+            config.backlogUserId = normalizeBacklogUserId(backlogUserId, "config.backlog.userId");
+        }
     }
     if (config.slackNotify) {
         const slackWebhookUrl = options.requireSlackWebhook
@@ -36740,9 +36744,16 @@ function isObject(value) {
 ;// CONCATENATED MODULE: ../core/dist/backlog.js
 
 async function fetchBacklogActivities(config) {
+    if (config.backlogSpaces.length === 0) {
+        return [];
+    }
+    if (!config.backlogApiKey) {
+        throw new Error("BACKLOG_API_KEY is required when Backlog is enabled.");
+    }
+    const backlogApiKey = config.backlogApiKey;
     const activitySets = await Promise.all(config.backlogSpaces.map((spaceConfig) => fetchBacklogSpaceActivities({
         ...spaceConfig,
-        backlogApiKey: config.backlogApiKey,
+        backlogApiKey,
         ...(config.backlogUserId ? { backlogUserId: config.backlogUserId } : {}),
         reportDate: config.reportDate,
         reportTimezone: config.reportTimezone
@@ -36804,7 +36815,9 @@ async function fetchRelevantIssues(config, projectIds) {
     const assignedIssues = config.backlogUserId
         ? await backlogGet(config, "/issues", {
             ...commonParams,
-            "assigneeId[]": [config.backlogUserId]
+            "assigneeId[]": [config.backlogUserId],
+            updatedSince: config.reportDate,
+            updatedUntil: config.reportDate
         })
         : [];
     const issues = new Map();
@@ -36830,7 +36843,7 @@ function issueToActivities(config, issue) {
         assignee: issue.assignee?.name,
         dueDate: issue.dueDate ?? undefined
     });
-    if (isOnReportDate(issue.updated, config.reportDate, config.reportTimezone) || isAssignedToUser(config, issue)) {
+    if (isOnReportDate(issue.updated, config.reportDate, config.reportTimezone)) {
         activities.push({
             source: "backlog",
             kind: "issue",
@@ -36844,7 +36857,7 @@ function issueToActivities(config, issue) {
             metadata
         });
     }
-    if (issue.dueDate && issue.dueDate <= config.reportDate && isAssignedToUser(config, issue)) {
+    if (issue.dueDate === config.reportDate && isAssignedToUser(config, issue)) {
         activities.push({
             source: "backlog",
             kind: "due_issue",
@@ -41597,7 +41610,7 @@ function generateTemplateReport({ config, activities, groups }) {
     }
     else {
         for (const group of groups) {
-            lines.push(`### ${formatGroupHeading(group)}`);
+            lines.push(`### ${formatGroupHeading(group)}`, "");
             for (const activity of group.activities) {
                 lines.push(`- ${describeActivity(activity, config.reportLanguage)}`);
             }
@@ -41632,7 +41645,7 @@ function generateTemplateReport({ config, activities, groups }) {
     }
     lines.push("");
     lines.push(`## ${labels.rawActivity}`, "");
-    lines.push(`### ${labels.github}`);
+    lines.push(`### ${labels.github}`, "");
     for (const line of rawActivityLines(activities.filter((activity) => activity.source === "github"))) {
         lines.push(`- ${line}`);
     }
@@ -41640,7 +41653,7 @@ function generateTemplateReport({ config, activities, groups }) {
         lines.push("- None");
     }
     lines.push("");
-    lines.push(`### ${labels.backlog}`);
+    lines.push(`### ${labels.backlog}`, "");
     for (const line of rawActivityLines(activities.filter((activity) => activity.source === "backlog"))) {
         lines.push(`- ${line}`);
     }
@@ -41673,7 +41686,7 @@ function describeActivity(activity, language) {
             case "status_change":
                 return `${prefix}${activity.body ?? "Backlogステータスを更新"}`;
             case "due_issue":
-                return `${prefix}期限が近い、または期限を過ぎた課題: ${title}`;
+                return `${prefix}本日が期限の課題: ${title}`;
         }
     }
     switch (activity.kind) {
@@ -41690,7 +41703,7 @@ function describeActivity(activity, language) {
         case "status_change":
             return `${prefix}${activity.body ?? "Backlog status changed."}`;
         case "due_issue":
-            return `${prefix}Due or near-due assigned issue: ${title}`;
+            return `${prefix}Assigned issue due today: ${title}`;
     }
 }
 function progressLines(groups, language) {
@@ -41757,7 +41770,7 @@ function labelForKind(kind) {
         case "status_change":
             return "Status";
         case "due_issue":
-            return "Due";
+            return "Due today";
     }
 }
 function statusSuffix(activity) {
@@ -41838,7 +41851,7 @@ function buildPrompt(input) {
 - Backlog課題キーを優先して整理する
 - GitHubのcommit/PRとBacklog課題が同じ課題キーを含む場合は同じ項目にまとめる
 - 課題・相談事項は、コメントやステータスから読み取れる範囲でのみ書く
-- 明日やることは、レビュー待ち、処理中、期限が近い課題から候補として書く
+- 明日やることは、レビュー待ち、処理中、本日が期限の課題から候補として書く
 - Markdownで出力する
 - 出力には日報本文のみを含める
 
@@ -41862,7 +41875,7 @@ Rules:
 - Group work by Backlog issue key when possible.
 - If GitHub commits/PRs and Backlog issues share the same issue key, merge them into the same section.
 - Write blockers/questions only when they are supported by comments, statuses, or issue data.
-- For next actions, use review-waiting, in-progress, or near-due issues as candidates.
+- For next actions, use review-waiting, in-progress, or issues due today as candidates.
 - Output Markdown only.
 - Output only the report body.
 

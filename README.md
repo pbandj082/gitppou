@@ -47,6 +47,8 @@ github:
     - owner/repo
 
 backlog:
+  # Set enabled: false to generate reports from GitHub only.
+  # enabled: false
   # Optional numeric Backlog user id. Omit to use the API key owner.
   # userId: "123456"
   spaces:
@@ -214,6 +216,13 @@ backlog:
     space-b:
       projectKeys:
         - OPS
+```
+
+Omit Backlog or disable it to generate a GitHub-only report:
+
+```yaml
+backlog:
+  enabled: false
 ```
 
 ## GitHub Models Mode

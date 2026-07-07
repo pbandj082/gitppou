@@ -125,6 +125,53 @@ describe("buildPreviewConfig", () => {
     ]);
   });
 
+  it("builds GitHub-only config when Backlog is disabled", () => {
+    const config = buildPreviewConfig(
+      {
+        github: {
+          username: "octocat",
+          repos: ["owner/repo"]
+        },
+        backlog: {
+          enabled: false
+        }
+      },
+      {},
+      {
+        GITHUB_TOKEN: "github-token"
+      }
+    );
+
+    expect(config).toMatchObject({
+      githubToken: "github-token",
+      githubUsername: "octocat",
+      githubRepos: ["owner/repo"],
+      backlogSpaces: []
+    });
+    expect(config.backlogApiKey).toBeUndefined();
+  });
+
+  it("builds GitHub-only config when Backlog is omitted", () => {
+    const config = buildPreviewConfig(
+      {
+        github: {
+          username: "octocat",
+          repos: ["owner/repo"]
+        }
+      },
+      {},
+      {
+        GITHUB_TOKEN: "github-token"
+      }
+    );
+
+    expect(config).toMatchObject({
+      githubToken: "github-token",
+      backlogSpaces: []
+    });
+    expect(config.backlogApiKey).toBeUndefined();
+  });
+
   it("rejects legacy single Backlog space config", () => {
     expect(() =>
       buildPreviewConfig(
@@ -314,6 +361,27 @@ describe("buildPreviewConfig", () => {
         {}
       )
     ).toThrow("GITHUB_TOKEN");
+  });
+
+  it("requires the Backlog API key only when Backlog is enabled", () => {
+    expect(() =>
+      buildPreviewConfig(
+        {
+          github: {
+            username: "octocat"
+          },
+          backlog: {
+            spaces: {
+              example: {}
+            }
+          }
+        },
+        {},
+        {
+          GITHUB_TOKEN: "github-token"
+        }
+      )
+    ).toThrow("BACKLOG_API_KEY");
   });
 
   it("loads env file values without overriding explicit environment variables", async () => {

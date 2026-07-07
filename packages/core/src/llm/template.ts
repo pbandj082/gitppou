@@ -62,7 +62,7 @@ export function generateTemplateReport({ config, activities, groups }: TemplateR
     lines.push(`- ${labels.noActivity}`, "");
   } else {
     for (const group of groups) {
-      lines.push(`### ${formatGroupHeading(group)}`);
+      lines.push(`### ${formatGroupHeading(group)}`, "");
       for (const activity of group.activities) {
         lines.push(`- ${describeActivity(activity, config.reportLanguage)}`);
       }
@@ -99,7 +99,7 @@ export function generateTemplateReport({ config, activities, groups }: TemplateR
   lines.push("");
 
   lines.push(`## ${labels.rawActivity}`, "");
-  lines.push(`### ${labels.github}`);
+  lines.push(`### ${labels.github}`, "");
   for (const line of rawActivityLines(activities.filter((activity) => activity.source === "github"))) {
     lines.push(`- ${line}`);
   }
@@ -108,7 +108,7 @@ export function generateTemplateReport({ config, activities, groups }: TemplateR
   }
   lines.push("");
 
-  lines.push(`### ${labels.backlog}`);
+  lines.push(`### ${labels.backlog}`, "");
   for (const line of rawActivityLines(activities.filter((activity) => activity.source === "backlog"))) {
     lines.push(`- ${line}`);
   }
@@ -146,7 +146,7 @@ function describeActivity(activity: NormalizedActivity, language: GitppouConfig[
       case "status_change":
         return `${prefix}${activity.body ?? "Backlogステータスを更新"}`;
       case "due_issue":
-        return `${prefix}期限が近い、または期限を過ぎた課題: ${title}`;
+        return `${prefix}本日が期限の課題: ${title}`;
     }
   }
 
@@ -164,7 +164,7 @@ function describeActivity(activity: NormalizedActivity, language: GitppouConfig[
     case "status_change":
       return `${prefix}${activity.body ?? "Backlog status changed."}`;
     case "due_issue":
-      return `${prefix}Due or near-due assigned issue: ${title}`;
+      return `${prefix}Assigned issue due today: ${title}`;
   }
 }
 
@@ -244,7 +244,7 @@ function labelForKind(kind: NormalizedActivity["kind"]): string {
     case "status_change":
       return "Status";
     case "due_issue":
-      return "Due";
+      return "Due today";
   }
 }
 

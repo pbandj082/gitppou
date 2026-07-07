@@ -30,7 +30,7 @@ export type GitppouConfig = {
   githubUsername: string;
   githubRepos: GitHubRepoSpec[];
 
-  backlogApiKey: string;
+  backlogApiKey?: string;
   backlogUserId?: string;
   backlogSpaces: BacklogSpaceConfig[];
 
