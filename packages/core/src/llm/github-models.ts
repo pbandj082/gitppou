@@ -25,14 +25,17 @@ export async function refineWithGitHubModels({
   activities,
   groups
 }: RefineInput): Promise<string> {
+  const reportEvidence = buildReportEvidence(activities);
   const evidenceJson = JSON.stringify(
     {
-      ...buildReportEvidence(activities),
+      userActions: reportEvidence.userActions,
       groupedUserActions: groups.map((group) => ({
         issueKey: group.issueKey,
         title: group.title,
-        actions: group.activities
-      }))
+        actions: group.activities,
+        commentContext: commentContextForGroup(activities, group.activities)
+      })),
+      contextOnly: reportEvidence.contextOnly.filter((activity) => activity.kind !== "comment_context")
     },
     null,
     2
@@ -98,6 +101,14 @@ function buildPrompt(input: {
 - GitHubのcommit/PRとBacklog課題が同じ課題キーを含む場合は同じ項目にまとめる
 - 「userActions」にある当日ユーザー本人の行動だけを「本日対応したこと」に書く
 - 「contextOnly」は直近の流れや課題の背景を説明するためだけに使い、ユーザー本人の作業として書かない
+- Backlogの「comment_context」は、ユーザーコメントが何への返信・確認なのかを判断するために使う
+- Backlogのcomment活動にmetadata.commentContext.previousCommentsがある場合は、そのコメント専用の直前文脈として最優先で読む
+- 「確認しました」「ありがとうございます」「対応しました」のような短いコメントは、直前コメントから確認依頼・レビュー依頼・質問・指摘の対象が分かる場合だけ、その対象を含めて書く
+- 確認コメントや返信を書く場合は、分かる範囲で「何を確認したか」「何に返信したか」が伝わる表現にする
+- テンプレート日報に直前コメントへの返信対象が具体的に書かれている場合は、汎用表現に戻さず維持する
+- 直前コメントの発言者は「発言者: 名前」のようにラベルで示し、本文中の@メンションと混同しない表現にする
+- comment_contextから対象が分かる場合は、「この課題について確認コメント」のような汎用表現のままにしない
+- ただしcomment_contextに根拠がない対象や意図は推測で書かない
 - 種別、カテゴリーなどのmetadataは文脈として使い、ユーザー本人の作業として扱わない
 - Backlogの「issue」「assigned_issue」「due_issue」は、それだけではユーザー本人の作業として扱わない
 - テンプレート日報の進捗にMermaid ganttが含まれる場合は、事実と矛盾しない範囲で維持する
@@ -127,6 +138,14 @@ Rules:
 - If GitHub commits/PRs and Backlog issues share the same issue key, merge them into the same section.
 - Write "Work completed today" only from entries in "userActions".
 - Use "contextOnly" only to explain recent flow or issue background. Do not present it as work done by the user.
+- Use Backlog "comment_context" entries to infer what a user comment confirms or replies to.
+- If a Backlog comment action has metadata.commentContext.previousComments, treat it as the direct prior context for that specific comment.
+- For short comments such as "confirmed", "thanks", or "done", include the request, review, question, or concern being answered only when the previous comments support it.
+- When describing confirmation comments or replies, include what was confirmed or replied to when the context supports it.
+- If the template report already describes a specific reply target from a previous comment, preserve that specificity instead of reverting to generic phrasing.
+- Label the previous comment speaker as "speaker: name" or equivalent; do not make the speaker look like a body mention.
+- If comment_context identifies the target, do not keep generic phrasing such as "commented on this issue".
+- Do not infer a target or intent that is not supported by comment_context.
 - Use metadata such as issue type and categories only as context. Do not present metadata as user work.
 - Do not treat Backlog "issue", "assigned_issue", or "due_issue" entries as user work by themselves.
 - If the template report includes a Mermaid gantt chart in the progress section, preserve it unless it conflicts with the evidence.
@@ -142,6 +161,36 @@ ${input.templateDraft}
 
 User-action evidence and context:
 ${input.evidenceJson}`;
+}
+
+function commentContextForGroup(
+  activities: NormalizedActivity[],
+  groupActivities: NormalizedActivity[]
+): NormalizedActivity[] {
+  const issueKey = groupActivities.find((activity) => activity.issueKey)?.issueKey;
+  if (!issueKey) {
+    return [];
+  }
+
+  const commentIds = new Set(
+    groupActivities
+      .map((activity) => activity.metadata?.backlogCommentId)
+      .filter((value): value is string | number => typeof value === "string" || typeof value === "number")
+      .map(String)
+  );
+
+  return activities.filter((activity) => {
+    if (activity.kind !== "comment_context" || activity.issueKey !== issueKey) {
+      return false;
+    }
+
+    const contextForCommentId = activity.metadata?.contextForCommentId;
+    if (commentIds.size === 0 || (typeof contextForCommentId !== "string" && typeof contextForCommentId !== "number")) {
+      return true;
+    }
+
+    return commentIds.has(String(contextForCommentId));
+  });
 }
 
 function truncate(value: string, maxChars: number): string {

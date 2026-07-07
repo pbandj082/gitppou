@@ -147,6 +147,8 @@ function describeActivity(
         return `${prefix}PRレビューを実施: ${title}`;
       case "comment":
         return `${prefix}${commentText(activity, title, context, "ja")}`;
+      case "comment_context":
+        return `${prefix}コメント前後の文脈: ${title}`;
       case "issue":
         return `${prefix}Backlog課題が更新: ${title}${statusSuffix(activity, "現在のステータス")}`;
       case "status_change":
@@ -167,6 +169,8 @@ function describeActivity(
       return `${prefix}Reviewed pull request: ${title}`;
     case "comment":
       return `${prefix}${commentText(activity, title, context, "en")}`;
+    case "comment_context":
+      return `${prefix}Comment context: ${title}`;
     case "issue":
       return `${prefix}Backlog issue updated: ${title}${statusSuffix(activity, "current status")}`;
     case "status_change":
@@ -199,17 +203,26 @@ function commentText(
   const body = compactBody(activity.body);
   const target = commentTarget(activity, title, context, language);
   const isConfirmation = body ? isConfirmationComment(body) : false;
+  const replyTarget = commentReplyTarget(activity, language, isConfirmation);
 
   if (language === "ja") {
     if (isConfirmation) {
-      return `${target}確認コメントを追加: ${body}`;
+      return `${replyTarget ?? target}確認コメントを追加: ${body}`;
+    }
+
+    if (replyTarget) {
+      return `${replyTarget}コメントを追加: ${body ?? title}`;
     }
 
     return `${target}コメントを追加: ${body ?? title}`;
   }
 
   if (isConfirmation) {
-    return `Added a confirmation comment ${target}: ${body}`;
+    return `Added a confirmation comment ${replyTarget ?? target}: ${body}`;
+  }
+
+  if (replyTarget) {
+    return `Commented ${replyTarget}: ${body ?? title}`;
   }
 
   return `Commented ${target}: ${body ?? title}`;
@@ -231,6 +244,131 @@ function commentTarget(
   }
 
   return language === "ja" ? "" : "on the activity";
+}
+
+function commentReplyTarget(
+  activity: NormalizedActivity,
+  language: GitppouConfig["reportLanguage"],
+  isConfirmation: boolean
+): string | undefined {
+  const previousComment = latestPreviousComment(activity);
+  if (!previousComment) {
+    return undefined;
+  }
+
+  if (language === "ja") {
+    if (isConfirmation) {
+      const requestTarget = confirmationRequestTarget(previousComment.body);
+      if (requestTarget) {
+        return `${previousCommentSpeakerPrefix(previousComment, language)}の確認依頼「${requestTarget}」に対して`;
+      }
+
+      return `${previousCommentReference(previousComment, language)}への`;
+    }
+
+    return `${previousCommentReference(previousComment, language)}への返信として`;
+  }
+
+  if (isConfirmation) {
+    const requestTarget = confirmationRequestTarget(previousComment.body);
+    if (requestTarget) {
+      return `for the confirmation request from ${speakerName(previousComment.author) ?? "unknown"} about "${requestTarget}"`;
+    }
+
+    return `in response to ${previousCommentReference(previousComment, language)}`;
+  }
+
+  return `in reply to ${previousCommentReference(previousComment, language)}`;
+}
+
+type PreviousCommentContext = {
+  author?: string;
+  body: string;
+};
+
+function latestPreviousComment(activity: NormalizedActivity): PreviousCommentContext | undefined {
+  const commentContext = activity.metadata?.commentContext;
+  if (!isRecord(commentContext)) {
+    return undefined;
+  }
+
+  const previousComments = commentContext.previousComments;
+  if (!Array.isArray(previousComments)) {
+    return undefined;
+  }
+
+  for (let index = previousComments.length - 1; index >= 0; index -= 1) {
+    const previousComment = previousComments[index];
+    if (!isRecord(previousComment) || typeof previousComment.body !== "string") {
+      continue;
+    }
+
+    const body = stripMarkdownBreaks(previousComment.body);
+    if (body) {
+      return {
+        ...(typeof previousComment.author === "string" && previousComment.author.trim()
+          ? { author: previousComment.author.trim() }
+          : {}),
+        body
+      };
+    }
+  }
+
+  return undefined;
+}
+
+function previousCommentReference(
+  comment: PreviousCommentContext,
+  language: GitppouConfig["reportLanguage"]
+): string {
+  const speaker = previousCommentSpeakerPrefix(comment, language);
+  const body = shortContext(comment.body);
+
+  if (language === "ja") {
+    return `${speaker} / 本文: 「${body}」`;
+  }
+
+  return `${speaker} / body: "${body}"`;
+}
+
+function previousCommentSpeakerPrefix(
+  comment: PreviousCommentContext,
+  language: GitppouConfig["reportLanguage"]
+): string {
+  const author = speakerName(comment.author);
+  if (language === "ja") {
+    return `直前コメント（発言者: ${author ?? "不明"}）`;
+  }
+
+  return `the previous comment by ${author ?? "unknown"}`;
+}
+
+function speakerName(author: string | undefined): string | undefined {
+  const name = author?.replace(/^@+/, "").trim();
+  return name || undefined;
+}
+
+function confirmationRequestTarget(value: string): string | undefined {
+  const normalized = stripMarkdownBreaks(value).replace(/^@[^\s]+[\s　]+/, "");
+  const target = normalized
+    .replace(/(?:について)?(?:ご)?確認(?:を)?(?:お願い(?:します|いたします)|ください)[。.!！]*$/u, "")
+    .replace(/(?:について)?(?:ご)?確認(?:を)?お願いします[。.!！]*$/u, "")
+    .trim();
+
+  if (!target || target === normalized) {
+    return undefined;
+  }
+
+  return shortContext(target);
+}
+
+function shortContext(value: string): string {
+  const compact = stripMarkdownBreaks(value);
+  return compact.length > 80 ? `${compact.slice(0, 80)}...` : compact;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }
 
 function issueMetadataLine(group: ActivityGroup, language: GitppouConfig["reportLanguage"]): string | undefined {
@@ -528,6 +666,8 @@ function labelForKind(kind: NormalizedActivity["kind"]): string {
       return "Review";
     case "comment":
       return "Comment";
+    case "comment_context":
+      return "Context";
     case "issue":
       return "Issue";
     case "status_change":

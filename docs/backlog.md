@@ -55,6 +55,7 @@ The v1 implementation collects:
 
 - Issues updated on the report date.
 - Comments created by the configured Backlog user on relevant issues.
+- Recent comments before the configured user's comment, attached to that comment as context for LLM report generation.
 - Status changes when they are available in Backlog comment change logs.
 - Assigned issues whose due date is the report date.
 - Recently updated unresolved issues assigned to the configured Backlog user for the progress chart.

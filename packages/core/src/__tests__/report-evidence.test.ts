@@ -32,6 +32,12 @@ describe("report evidence", () => {
         kind: "assigned_issue",
         issueKey: "APP-3",
         title: "APP-3 Assigned issue"
+      },
+      {
+        source: "backlog",
+        kind: "comment_context",
+        issueKey: "APP-4",
+        title: "APP-4 Comment context"
       }
     ];
 
@@ -54,6 +60,10 @@ describe("report evidence", () => {
         {
           kind: "assigned_issue",
           issueKey: "APP-3"
+        },
+        {
+          kind: "comment_context",
+          issueKey: "APP-4"
         }
       ]
     });

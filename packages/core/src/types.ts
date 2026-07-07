@@ -56,6 +56,7 @@ export type ActivityKind =
   | "pull_request"
   | "review"
   | "comment"
+  | "comment_context"
   | "issue"
   | "status_change"
   | "assigned_issue"
