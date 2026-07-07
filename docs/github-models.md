@@ -23,6 +23,7 @@ When `llm.provider` is `github-models`, Gitppou sends:
 - Normalized GitHub and Backlog activity data.
 - Backlog issue metadata included in those activities, such as issue type and category.
 - Assigned Backlog issue context used by the progress gantt chart.
+- Recent Backlog discussion context attached to each user comment, used to infer what a reply or confirmation refers to.
 
 The data is capped by `llm.maxInputChars`.
 

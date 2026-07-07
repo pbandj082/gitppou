@@ -36485,6 +36485,10 @@ function buildGitppouConfig(rawConfig, options, env, now = new Date()) {
             config.slackWebhookUrl = slackWebhookUrl;
         }
     }
+    const githubActionsContext = resolveGitHubActionsContext(env);
+    if (githubActionsContext) {
+        config.githubActionsContext = githubActionsContext;
+    }
     return config;
 }
 function getSection(root, key) {
@@ -36493,6 +36497,19 @@ function getSection(root, key) {
         return {};
     }
     return asObject(value, `config.${key}`);
+}
+function resolveGitHubActionsContext(env) {
+    const context = compactObject({
+        actor: env.GITHUB_ACTOR?.trim(),
+        eventName: env.GITHUB_EVENT_NAME?.trim(),
+        refName: env.GITHUB_REF_NAME?.trim(),
+        repository: env.GITHUB_REPOSITORY?.trim(),
+        runId: env.GITHUB_RUN_ID?.trim(),
+        runNumber: env.GITHUB_RUN_NUMBER?.trim(),
+        serverUrl: env.GITHUB_SERVER_URL?.trim(),
+        workflow: env.GITHUB_WORKFLOW?.trim()
+    });
+    return Object.keys(context).length > 0 ? context : undefined;
 }
 function asObject(value, pathLabel) {
     if (isObject(value)) {
@@ -36723,6 +36740,9 @@ function resolveGitHubTokensByOwner(github, env) {
     const tokenEnvByOwner = getStringRecord(github, "tokens", "config.github.tokens");
     return Object.fromEntries(Object.entries(tokenEnvByOwner).map(([owner, envName]) => [owner, requiredEnv(env, envName)]));
 }
+function compactObject(value) {
+    return Object.fromEntries(Object.entries(value).filter((entry) => typeof entry[1] === "string" && entry[1] !== ""));
+}
 function requiredEnv(env, name) {
     const value = env[name]?.trim();
     if (!value) {
@@ -36744,6 +36764,8 @@ function isObject(value) {
 ;// CONCATENATED MODULE: ../core/dist/backlog.js
 
 const ASSIGNED_PROGRESS_FETCH_LIMIT = 50;
+const COMMENT_CONTEXT_LIMIT = 8;
+const COMMENT_CONTEXT_BODY_LIMIT = 300;
 async function fetchBacklogActivities(config) {
     if (config.backlogSpaces.length === 0) {
         return [];
@@ -36928,10 +36950,16 @@ function commentsToActivities(config, issue, comments) {
             continue;
         }
         const url = `${buildIssueUrl(config, issue.issueKey)}#comment-${comment.id}`;
-        const metadata = compactMetadata({
+        const previousComments = previousContextComments(comments, comment);
+        const commentContext = commentContextMetadata(issue, previousComments);
+        const baseMetadata = compactMetadata({
             ...issueMetadata(config, issue),
             backlogCommentId: comment.id,
             author: comment.createdUser?.name
+        });
+        const metadata = compactMetadata({
+            ...baseMetadata,
+            ...(commentContext ? { commentContext } : {})
         });
         if (comment.content?.trim()) {
             activities.push({
@@ -36946,6 +36974,10 @@ function commentsToActivities(config, issue, comments) {
                 ...(comment.updated ? { updatedAt: comment.updated } : {}),
                 metadata
             });
+            const contextActivity = commentContextActivity(config, issue, previousComments, comment, baseMetadata);
+            if (contextActivity) {
+                activities.push(contextActivity);
+            }
         }
         for (const change of comment.changeLog ?? []) {
             if (!change.field || !/status/i.test(change.field)) {
@@ -36961,7 +36993,7 @@ function commentsToActivities(config, issue, comments) {
                 url,
                 ...(comment.created ? { createdAt: comment.created } : {}),
                 metadata: compactMetadata({
-                    ...metadata,
+                    ...baseMetadata,
                     field: change.field,
                     status: change.newValue,
                     originalValue: change.originalValue,
@@ -36971,6 +37003,73 @@ function commentsToActivities(config, issue, comments) {
         }
     }
     return activities;
+}
+function commentContextActivity(config, issue, previousComments, currentComment, metadata) {
+    if (previousComments.length === 0) {
+        return undefined;
+    }
+    const body = [
+        `Issue summary: ${issue.summary}`,
+        issue.description?.trim() ? `Issue description: ${compactText(issue.description, COMMENT_CONTEXT_BODY_LIMIT)}` : "",
+        "Recent Backlog discussion before the user's comment:",
+        ...previousComments.map(formatContextComment),
+        `User comment: ${formatContextComment(currentComment)}`
+    ].filter(Boolean).join("\n");
+    return {
+        source: "backlog",
+        kind: "comment_context",
+        projectKey: getProjectKey(issue.issueKey),
+        issueKey: issue.issueKey,
+        title: `${issue.issueKey} comment context: ${issue.summary}`,
+        body,
+        url: `${buildIssueUrl(config, issue.issueKey)}#comment-${currentComment.id}`,
+        ...(currentComment.created ? { createdAt: currentComment.created } : {}),
+        metadata: compactMetadata({
+            ...metadata,
+            contextForCommentId: currentComment.id,
+            contextCommentIds: previousComments.map((comment) => comment.id)
+        })
+    };
+}
+function previousContextComments(comments, currentComment) {
+    return comments
+        .filter((comment) => comment.id !== currentComment.id)
+        .filter((comment) => comment.content?.trim())
+        .filter((comment) => isBeforeOrSame(comment.created, currentComment.created))
+        .slice(-COMMENT_CONTEXT_LIMIT);
+}
+function commentContextMetadata(issue, previousComments) {
+    const issueDescription = issue.description?.trim()
+        ? compactText(issue.description, COMMENT_CONTEXT_BODY_LIMIT)
+        : undefined;
+    const previousCommentEvidence = previousComments.map(commentEvidence);
+    if (!issueDescription && previousCommentEvidence.length === 0) {
+        return undefined;
+    }
+    return compactMetadata({
+        issueSummary: issue.summary,
+        issueDescription,
+        previousComments: previousCommentEvidence
+    });
+}
+function commentEvidence(comment) {
+    return compactMetadata({
+        id: comment.id,
+        author: comment.createdUser?.name,
+        createdAt: comment.created,
+        body: compactText(comment.content ?? "", COMMENT_CONTEXT_BODY_LIMIT)
+    });
+}
+function formatContextComment(comment) {
+    const author = comment.createdUser?.name ?? "Unknown";
+    const created = comment.created ?? "unknown date";
+    return `- ${created} ${author}: ${compactText(comment.content ?? "", COMMENT_CONTEXT_BODY_LIMIT)}`;
+}
+function isBeforeOrSame(left, right) {
+    if (!left || !right) {
+        return true;
+    }
+    return Date.parse(left) <= Date.parse(right);
 }
 async function backlogGet(config, path, params) {
     const host = backlogHost(config);
@@ -37047,6 +37146,10 @@ async function safeResponseText(response) {
 }
 function compactResponseBody(value) {
     return value.replace(/\s+/g, " ").trim().slice(0, 300);
+}
+function compactText(value, maxChars) {
+    const compact = value.replace(/\s+/g, " ").trim();
+    return compact.length > maxChars ? `${compact.slice(0, maxChars)}...` : compact;
 }
 function buildIssueUrl(config, issueKey) {
     return `https://${backlogHost(config)}/view/${issueKey}`;
@@ -41508,7 +41611,11 @@ async function fetchPullRequests(octokit, repo, config) {
     ]);
     const mergedByUser = await filterMergedByUser(octokit, repo, merged, config.githubUsername);
     const items = mergeSearchItems([...created, ...updated, ...mergedByUser]);
-    return items.map((item) => {
+    const itemsWithStats = await Promise.all(items.map(async (item) => ({
+        item,
+        stats: await fetchPullRequestStats(octokit, repo, item.number)
+    })));
+    return itemsWithStats.map(({ item, stats }) => {
         const activity = {
             source: "github",
             kind: "pull_request",
@@ -41519,7 +41626,10 @@ async function fetchPullRequests(octokit, repo, config) {
             url: item.html_url,
             metadata: {
                 number: item.number,
-                state: item.state
+                state: item.state,
+                additions: stats.additions,
+                deletions: stats.deletions,
+                changedFiles: stats.changedFiles
             }
         };
         if (item.body) {
@@ -41530,6 +41640,18 @@ async function fetchPullRequests(octokit, repo, config) {
         }
         return activity;
     });
+}
+async function fetchPullRequestStats(octokit, repo, pullNumber) {
+    const response = await octokit.pulls.get({
+        owner: repo.owner,
+        repo: repo.repo,
+        pull_number: pullNumber
+    });
+    return {
+        additions: response.data.additions,
+        deletions: response.data.deletions,
+        changedFiles: response.data.changed_files
+    };
 }
 async function github_fetchIssueComments(octokit, repo, config) {
     const { since } = getReportDateRange(config.reportDate, config.reportTimezone);
@@ -41646,6 +41768,7 @@ var external_node_path_ = __nccwpck_require__(6760);
 ;// CONCATENATED MODULE: ../core/dist/report-evidence.js
 function isUserActionActivity(activity) {
     switch (activity.kind) {
+        case "comment_context":
         case "issue":
         case "assigned_issue":
         case "due_issue":
@@ -41816,11 +41939,13 @@ function describeActivity(activity, language, context = {}) {
             case "commit":
                 return `${prefix}commitを作成: ${title}`;
             case "pull_request":
-                return `${prefix}PRを更新: ${title}`;
+                return `${prefix}PRを更新: ${title}${pullRequestStatsSuffix(activity, "ja")}`;
             case "review":
                 return `${prefix}PRレビューを実施: ${title}`;
             case "comment":
                 return `${prefix}${commentText(activity, title, context, "ja")}`;
+            case "comment_context":
+                return `${prefix}コメント前後の文脈: ${title}`;
             case "issue":
                 return `${prefix}Backlog課題が更新: ${title}${statusSuffix(activity, "現在のステータス")}`;
             case "status_change":
@@ -41835,11 +41960,13 @@ function describeActivity(activity, language, context = {}) {
         case "commit":
             return `${prefix}Committed: ${title}`;
         case "pull_request":
-            return `${prefix}Updated pull request: ${title}`;
+            return `${prefix}Updated pull request: ${title}${pullRequestStatsSuffix(activity, "en")}`;
         case "review":
             return `${prefix}Reviewed pull request: ${title}`;
         case "comment":
             return `${prefix}${commentText(activity, title, context, "en")}`;
+        case "comment_context":
+            return `${prefix}Comment context: ${title}`;
         case "issue":
             return `${prefix}Backlog issue updated: ${title}${statusSuffix(activity, "current status")}`;
         case "status_change":
@@ -41863,14 +41990,21 @@ function commentText(activity, title, context, language) {
     const body = compactBody(activity.body);
     const target = commentTarget(activity, title, context, language);
     const isConfirmation = body ? isConfirmationComment(body) : false;
+    const replyTarget = commentReplyTarget(activity, language, isConfirmation);
     if (language === "ja") {
         if (isConfirmation) {
-            return `${target}確認コメントを追加: ${body}`;
+            return `${replyTarget ?? target}確認コメントを追加: ${body}`;
+        }
+        if (replyTarget) {
+            return `${replyTarget}コメントを追加: ${body ?? title}`;
         }
         return `${target}コメントを追加: ${body ?? title}`;
     }
     if (isConfirmation) {
-        return `Added a confirmation comment ${target}: ${body}`;
+        return `Added a confirmation comment ${replyTarget ?? target}: ${body}`;
+    }
+    if (replyTarget) {
+        return `Commented ${replyTarget}: ${body ?? title}`;
     }
     return `Commented ${target}: ${body ?? title}`;
 }
@@ -41883,6 +42017,93 @@ function commentTarget(activity, title, context, language) {
         return language === "ja" ? `「${targetTitle}」について` : `on "${targetTitle}"`;
     }
     return language === "ja" ? "" : "on the activity";
+}
+function commentReplyTarget(activity, language, isConfirmation) {
+    const previousComment = latestPreviousComment(activity);
+    if (!previousComment) {
+        return undefined;
+    }
+    if (language === "ja") {
+        if (isConfirmation) {
+            const requestTarget = confirmationRequestTarget(previousComment.body);
+            if (requestTarget) {
+                return `${previousCommentSpeakerPrefix(previousComment, language)}の確認依頼「${requestTarget}」に対して`;
+            }
+            return `${previousCommentReference(previousComment, language)}への`;
+        }
+        return `${previousCommentReference(previousComment, language)}への返信として`;
+    }
+    if (isConfirmation) {
+        const requestTarget = confirmationRequestTarget(previousComment.body);
+        if (requestTarget) {
+            return `for the confirmation request from ${speakerName(previousComment.author) ?? "unknown"} about "${requestTarget}"`;
+        }
+        return `in response to ${previousCommentReference(previousComment, language)}`;
+    }
+    return `in reply to ${previousCommentReference(previousComment, language)}`;
+}
+function latestPreviousComment(activity) {
+    const commentContext = activity.metadata?.commentContext;
+    if (!isRecord(commentContext)) {
+        return undefined;
+    }
+    const previousComments = commentContext.previousComments;
+    if (!Array.isArray(previousComments)) {
+        return undefined;
+    }
+    for (let index = previousComments.length - 1; index >= 0; index -= 1) {
+        const previousComment = previousComments[index];
+        if (!isRecord(previousComment) || typeof previousComment.body !== "string") {
+            continue;
+        }
+        const body = stripMarkdownBreaks(previousComment.body);
+        if (body) {
+            return {
+                ...(typeof previousComment.author === "string" && previousComment.author.trim()
+                    ? { author: previousComment.author.trim() }
+                    : {}),
+                body
+            };
+        }
+    }
+    return undefined;
+}
+function previousCommentReference(comment, language) {
+    const speaker = previousCommentSpeakerPrefix(comment, language);
+    const body = shortContext(comment.body);
+    if (language === "ja") {
+        return `${speaker} / 本文: 「${body}」`;
+    }
+    return `${speaker} / body: "${body}"`;
+}
+function previousCommentSpeakerPrefix(comment, language) {
+    const author = speakerName(comment.author);
+    if (language === "ja") {
+        return `直前コメント（発言者: ${author ?? "不明"}）`;
+    }
+    return `the previous comment by ${author ?? "unknown"}`;
+}
+function speakerName(author) {
+    const name = author?.replace(/^@+/, "").trim();
+    return name || undefined;
+}
+function confirmationRequestTarget(value) {
+    const normalized = stripMarkdownBreaks(value).replace(/^@[^\s]+[\s　]+/, "");
+    const target = normalized
+        .replace(/(?:について)?(?:ご)?確認(?:を)?(?:お願い(?:します|いたします)|ください)[。.!！]*$/u, "")
+        .replace(/(?:について)?(?:ご)?確認(?:を)?お願いします[。.!！]*$/u, "")
+        .trim();
+    if (!target || target === normalized) {
+        return undefined;
+    }
+    return shortContext(target);
+}
+function shortContext(value) {
+    const compact = stripMarkdownBreaks(value);
+    return compact.length > 80 ? `${compact.slice(0, 80)}...` : compact;
+}
+function isRecord(value) {
+    return typeof value === "object" && value !== null;
 }
 function issueMetadataLine(group, language) {
     if (group.issueKey === "Unlinked") {
@@ -42102,6 +42323,8 @@ function labelForKind(kind) {
             return "Review";
         case "comment":
             return "Comment";
+        case "comment_context":
+            return "Context";
         case "issue":
             return "Issue";
         case "status_change":
@@ -42115,6 +42338,26 @@ function labelForKind(kind) {
 function statusSuffix(activity, label = "status") {
     const status = typeof activity.metadata?.status === "string" ? activity.metadata.status : undefined;
     return status ? ` (${label}: ${status})` : "";
+}
+function pullRequestStatsSuffix(activity, language) {
+    const additions = metadataNumber(activity, "additions");
+    const deletions = metadataNumber(activity, "deletions");
+    const changedFiles = metadataNumber(activity, "changedFiles");
+    if (additions === undefined && deletions === undefined && changedFiles === undefined) {
+        return "";
+    }
+    const diff = [
+        additions === undefined ? undefined : `+${additions}`,
+        deletions === undefined ? undefined : `-${deletions}`
+    ].filter((value) => Boolean(value)).join(" / ");
+    const files = changedFiles === undefined
+        ? undefined
+        : `${changedFiles} files`;
+    const parts = [diff || undefined, files].filter((value) => Boolean(value));
+    if (parts.length === 0) {
+        return "";
+    }
+    return language === "ja" ? `（${parts.join("、")}）` : ` (${parts.join(", ")})`;
 }
 function statusChangeText(activity, language) {
     const originalValue = metadataString(activity, "originalValue");
@@ -42139,6 +42382,10 @@ function statusChangeText(activity, language) {
 function metadataString(activity, key) {
     const value = activity.metadata?.[key];
     return typeof value === "string" && value.trim() !== "" ? value : undefined;
+}
+function metadataNumber(activity, key) {
+    const value = activity.metadata?.[key];
+    return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 function metadataDate(activity, key) {
     return metadataString(activity, key)?.match(/^\d{4}-\d{2}-\d{2}/)?.[0];
@@ -42195,13 +42442,16 @@ function stripMarkdownBreaks(value) {
 const GITHUB_MODELS_ENDPOINT = "https://models.github.ai/inference/chat/completions";
 const GITHUB_API_VERSION = "2026-03-10";
 async function refineWithGitHubModels({ config, templateDraft, activities, groups }) {
+    const reportEvidence = buildReportEvidence(activities);
     const evidenceJson = JSON.stringify({
-        ...buildReportEvidence(activities),
+        userActions: reportEvidence.userActions,
         groupedUserActions: groups.map((group) => ({
             issueKey: group.issueKey,
             title: group.title,
-            actions: group.activities
-        }))
+            actions: group.activities,
+            commentContext: commentContextForGroup(activities, group.activities)
+        })),
+        contextOnly: reportEvidence.contextOnly.filter((activity) => activity.kind !== "comment_context")
     }, null, 2);
     const prompt = buildPrompt({
         date: config.reportDate,
@@ -42253,7 +42503,16 @@ function buildPrompt(input) {
 - GitHubのcommit/PRとBacklog課題が同じ課題キーを含む場合は同じ項目にまとめる
 - 「userActions」にある当日ユーザー本人の行動だけを「本日対応したこと」に書く
 - 「contextOnly」は直近の流れや課題の背景を説明するためだけに使い、ユーザー本人の作業として書かない
+- Backlogの「comment_context」は、ユーザーコメントが何への返信・確認なのかを判断するために使う
+- Backlogのcomment活動にmetadata.commentContext.previousCommentsがある場合は、そのコメント専用の直前文脈として最優先で読む
+- 「確認しました」「ありがとうございます」「対応しました」のような短いコメントは、直前コメントから確認依頼・レビュー依頼・質問・指摘の対象が分かる場合だけ、その対象を含めて書く
+- 確認コメントや返信を書く場合は、分かる範囲で「何を確認したか」「何に返信したか」が伝わる表現にする
+- テンプレート日報に直前コメントへの返信対象が具体的に書かれている場合は、汎用表現に戻さず維持する
+- 直前コメントの発言者は「発言者: 名前」のようにラベルで示し、本文中の@メンションと混同しない表現にする
+- comment_contextから対象が分かる場合は、「この課題について確認コメント」のような汎用表現のままにしない
+- ただしcomment_contextに根拠がない対象や意図は推測で書かない
 - 種別、カテゴリーなどのmetadataは文脈として使い、ユーザー本人の作業として扱わない
+- GitHub PRのmetadata.additions/deletions/changedFilesはPR全体の差分サマリとして扱い、テンプレートに表示されている場合は維持する
 - Backlogの「issue」「assigned_issue」「due_issue」は、それだけではユーザー本人の作業として扱わない
 - テンプレート日報の進捗にMermaid ganttが含まれる場合は、事実と矛盾しない範囲で維持する
 - 明日やることは、レビュー待ち、処理中、本日が期限の課題から候補として書く
@@ -42281,7 +42540,16 @@ Rules:
 - If GitHub commits/PRs and Backlog issues share the same issue key, merge them into the same section.
 - Write "Work completed today" only from entries in "userActions".
 - Use "contextOnly" only to explain recent flow or issue background. Do not present it as work done by the user.
+- Use Backlog "comment_context" entries to infer what a user comment confirms or replies to.
+- If a Backlog comment action has metadata.commentContext.previousComments, treat it as the direct prior context for that specific comment.
+- For short comments such as "confirmed", "thanks", or "done", include the request, review, question, or concern being answered only when the previous comments support it.
+- When describing confirmation comments or replies, include what was confirmed or replied to when the context supports it.
+- If the template report already describes a specific reply target from a previous comment, preserve that specificity instead of reverting to generic phrasing.
+- Label the previous comment speaker as "speaker: name" or equivalent; do not make the speaker look like a body mention.
+- If comment_context identifies the target, do not keep generic phrasing such as "commented on this issue".
+- Do not infer a target or intent that is not supported by comment_context.
 - Use metadata such as issue type and categories only as context. Do not present metadata as user work.
+- Treat GitHub PR metadata.additions/deletions/changedFiles as whole-PR diff stats, and preserve them when the template displays them.
 - Do not treat Backlog "issue", "assigned_issue", or "due_issue" entries as user work by themselves.
 - If the template report includes a Mermaid gantt chart in the progress section, preserve it unless it conflicts with the evidence.
 - For next actions, use review-waiting, in-progress, or issues due today as candidates.
@@ -42296,6 +42564,26 @@ ${input.templateDraft}
 
 User-action evidence and context:
 ${input.evidenceJson}`;
+}
+function commentContextForGroup(activities, groupActivities) {
+    const issueKey = groupActivities.find((activity) => activity.issueKey)?.issueKey;
+    if (!issueKey) {
+        return [];
+    }
+    const commentIds = new Set(groupActivities
+        .map((activity) => activity.metadata?.backlogCommentId)
+        .filter((value) => typeof value === "string" || typeof value === "number")
+        .map(String));
+    return activities.filter((activity) => {
+        if (activity.kind !== "comment_context" || activity.issueKey !== issueKey) {
+            return false;
+        }
+        const contextForCommentId = activity.metadata?.contextForCommentId;
+        if (commentIds.size === 0 || (typeof contextForCommentId !== "string" && typeof contextForCommentId !== "number")) {
+            return true;
+        }
+        return commentIds.has(String(contextForCommentId));
+    });
 }
 function truncate(value, maxChars) {
     if (value.length <= maxChars) {
@@ -42437,7 +42725,9 @@ function generateSlackSummary(config, groups, reportPath) {
     const title = isJapanese ? `日報 ${config.reportDate}` : `Daily Report - ${config.reportDate}`;
     const workLabel = isJapanese ? "本日対応:" : "Work:";
     const blockerLabel = isJapanese ? "課題・相談:" : "Blockers / Questions:";
+    const runLabel = isJapanese ? "実行:" : "Run:";
     const detailsLabel = isJapanese ? "詳細:" : "Details:";
+    const runLines = githubActionsContextLines(config.githubActionsContext, config.reportLanguage);
     const workItems = groups.slice(0, 8).map((group) => `- ${formatGroup(group)}`);
     const blockers = groups
         .flatMap((group) => group.activities
@@ -42447,6 +42737,7 @@ function generateSlackSummary(config, groups, reportPath) {
     const lines = [
         title,
         "",
+        ...(runLines.length > 0 ? [runLabel, ...runLines, ""] : []),
         workLabel,
         ...(workItems.length > 0 ? workItems : [isJapanese ? "- 活動なし" : "- No activity found"]),
         "",
@@ -42457,6 +42748,31 @@ function generateSlackSummary(config, groups, reportPath) {
         reportPath
     ];
     return slack_truncate(lines.join("\n"), 3500);
+}
+function githubActionsContextLines(context, language) {
+    if (!context) {
+        return [];
+    }
+    const isJapanese = language === "ja";
+    const runUrl = githubActionsRunUrl(context);
+    return [
+        context.actor ? `- ${isJapanese ? "実行者" : "Actor"}: ${context.actor}` : undefined,
+        context.workflow || context.runNumber
+            ? `- Workflow: ${[context.workflow, context.runNumber ? `#${context.runNumber}` : undefined].filter(Boolean).join(" ")}`
+            : undefined,
+        context.repository || context.refName
+            ? `- Repository: ${[context.repository, context.refName ? `(${context.refName})` : undefined].filter(Boolean).join(" ")}`
+            : undefined,
+        context.eventName ? `- Event: ${context.eventName}` : undefined,
+        runUrl ? `- URL: ${runUrl}` : undefined
+    ].filter((line) => Boolean(line));
+}
+function githubActionsRunUrl(context) {
+    if (!context.repository || !context.runId) {
+        return undefined;
+    }
+    const serverUrl = context.serverUrl ?? "https://github.com";
+    return `${serverUrl.replace(/\/+$/g, "")}/${context.repository}/actions/runs/${context.runId}`;
 }
 async function sendSlackNotification(webhookUrl, text) {
     if (!webhookUrl) {

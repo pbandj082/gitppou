@@ -164,6 +164,79 @@ describe("report helpers", () => {
     expect(markdown).not.toContain("## 課題・相談事項");
   });
 
+  it("describes confirmation comments with their previous comment context", () => {
+    const activity: NormalizedActivity = {
+      source: "backlog",
+      kind: "comment",
+      issueKey: "APP-1",
+      title: "APP-1 Updated issue",
+      body: "確認しました！",
+      url: "https://example.backlog.com/view/APP-1#comment-901",
+      metadata: {
+        commentContext: {
+          previousComments: [
+            {
+              id: 900,
+              author: "@Reviewer",
+              createdAt: "2026-07-06T09:00:00+09:00",
+              body: "@alice ログイン後に二重遷移しないか確認をお願いします。"
+            }
+          ]
+        }
+      }
+    };
+    const markdown = generateTemplateReport({
+      config: {
+        ...baseConfig,
+        reportLanguage: "ja"
+      },
+      activities: [activity],
+      groups: [
+        {
+          issueKey: "APP-1",
+          title: "Updated issue",
+          activities: [activity]
+        }
+      ]
+    });
+
+    expect(markdown).toContain(
+      "- 直前コメント（発言者: Reviewer）の確認依頼「ログイン後に二重遷移しないか」に対して確認コメントを追加: 確認しました！"
+    );
+    expect(markdown).not.toContain("発言者: @Reviewer");
+    expect(markdown).not.toContain("- この課題について確認コメントを追加");
+  });
+
+  it("renders pull request diff stats", () => {
+    const activity: NormalizedActivity = {
+      source: "github",
+      kind: "pull_request",
+      title: "APP-1 Update login flow",
+      repository: "owner/repo",
+      metadata: {
+        additions: 120,
+        deletions: 32,
+        changedFiles: 4
+      }
+    };
+    const markdown = generateTemplateReport({
+      config: {
+        ...baseConfig,
+        reportLanguage: "ja"
+      },
+      activities: [activity],
+      groups: [
+        {
+          issueKey: "APP-1",
+          title: "Update login flow",
+          activities: [activity]
+        }
+      ]
+    });
+
+    expect(markdown).toContain("- PRを更新: APP-1 Update login flow（+120 / -32、4 files）");
+  });
+
   it("keeps the issue key when an activity belongs to a different issue than the group", () => {
     const activity: NormalizedActivity = {
       source: "backlog",

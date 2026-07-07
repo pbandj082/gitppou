@@ -237,7 +237,7 @@ llm:
   model: openai/gpt-4o-mini
 ```
 
-When `llm.provider` is set to `github-models`, Gitppou sends normalized GitHub and Backlog activity data to GitHub Models for report generation. Backlog activities include issue metadata such as issue type and category when available. Gitppou first creates a fact-based template report, then asks GitHub Models to refine that report without inventing unsupported work.
+When `llm.provider` is set to `github-models`, Gitppou sends normalized GitHub and Backlog activity data to GitHub Models for report generation. Backlog activities include issue metadata such as issue type and category when available, plus recent Backlog discussion context attached to each user comment. Gitppou first creates a fact-based template report, then asks GitHub Models to refine that report without inventing unsupported work.
 
 GitHub Models can be used with a free, rate-limited quota available to GitHub accounts. For production or higher-volume use, users may need to enable paid GitHub Models usage. GitHub Models billing is separate from GitHub Copilot billing.
 
@@ -292,7 +292,7 @@ env:
   SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
 ```
 
-Slack receives a summary, not the full raw activity. Slack failures are warnings in v1 and do not fail the action.
+Slack receives a summary, not the full raw activity. When running in GitHub Actions, the summary includes the actor, workflow, repository/ref, event, and workflow run URL. Slack failures are warnings in v1 and do not fail the action.
 
 ## Commit Behavior
 

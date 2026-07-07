@@ -61,6 +61,8 @@ type BacklogComment = {
 
 type QueryValue = string | number | boolean | readonly (string | number | boolean)[];
 const ASSIGNED_PROGRESS_FETCH_LIMIT = 50;
+const COMMENT_CONTEXT_LIMIT = 8;
+const COMMENT_CONTEXT_BODY_LIMIT = 300;
 
 export async function fetchBacklogActivities(config: GitppouConfig): Promise<NormalizedActivity[]> {
   if (config.backlogSpaces.length === 0) {
@@ -303,10 +305,16 @@ function commentsToActivities(
     }
 
     const url = `${buildIssueUrl(config, issue.issueKey)}#comment-${comment.id}`;
-    const metadata = compactMetadata({
+    const previousComments = previousContextComments(comments, comment);
+    const commentContext = commentContextMetadata(issue, previousComments);
+    const baseMetadata = compactMetadata({
       ...issueMetadata(config, issue),
       backlogCommentId: comment.id,
       author: comment.createdUser?.name
+    });
+    const metadata = compactMetadata({
+      ...baseMetadata,
+      ...(commentContext ? { commentContext } : {})
     });
 
     if (comment.content?.trim()) {
@@ -322,6 +330,11 @@ function commentsToActivities(
         ...(comment.updated ? { updatedAt: comment.updated } : {}),
         metadata
       });
+
+      const contextActivity = commentContextActivity(config, issue, previousComments, comment, baseMetadata);
+      if (contextActivity) {
+        activities.push(contextActivity);
+      }
     }
 
     for (const change of comment.changeLog ?? []) {
@@ -339,7 +352,7 @@ function commentsToActivities(
         url,
         ...(comment.created ? { createdAt: comment.created } : {}),
         metadata: compactMetadata({
-          ...metadata,
+          ...baseMetadata,
           field: change.field,
           status: change.newValue,
           originalValue: change.originalValue,
@@ -350,6 +363,93 @@ function commentsToActivities(
   }
 
   return activities;
+}
+
+function commentContextActivity(
+  config: BacklogSpaceContext,
+  issue: BacklogIssue,
+  previousComments: BacklogComment[],
+  currentComment: BacklogComment,
+  metadata: Record<string, unknown>
+): NormalizedActivity | undefined {
+  if (previousComments.length === 0) {
+    return undefined;
+  }
+
+  const body = [
+    `Issue summary: ${issue.summary}`,
+    issue.description?.trim() ? `Issue description: ${compactText(issue.description, COMMENT_CONTEXT_BODY_LIMIT)}` : "",
+    "Recent Backlog discussion before the user's comment:",
+    ...previousComments.map(formatContextComment),
+    `User comment: ${formatContextComment(currentComment)}`
+  ].filter(Boolean).join("\n");
+
+  return {
+    source: "backlog",
+    kind: "comment_context",
+    projectKey: getProjectKey(issue.issueKey),
+    issueKey: issue.issueKey,
+    title: `${issue.issueKey} comment context: ${issue.summary}`,
+    body,
+    url: `${buildIssueUrl(config, issue.issueKey)}#comment-${currentComment.id}`,
+    ...(currentComment.created ? { createdAt: currentComment.created } : {}),
+    metadata: compactMetadata({
+      ...metadata,
+      contextForCommentId: currentComment.id,
+      contextCommentIds: previousComments.map((comment) => comment.id)
+    })
+  };
+}
+
+function previousContextComments(comments: BacklogComment[], currentComment: BacklogComment): BacklogComment[] {
+  return comments
+    .filter((comment) => comment.id !== currentComment.id)
+    .filter((comment) => comment.content?.trim())
+    .filter((comment) => isBeforeOrSame(comment.created, currentComment.created))
+    .slice(-COMMENT_CONTEXT_LIMIT);
+}
+
+function commentContextMetadata(
+  issue: BacklogIssue,
+  previousComments: BacklogComment[]
+): Record<string, unknown> | undefined {
+  const issueDescription = issue.description?.trim()
+    ? compactText(issue.description, COMMENT_CONTEXT_BODY_LIMIT)
+    : undefined;
+  const previousCommentEvidence = previousComments.map(commentEvidence);
+
+  if (!issueDescription && previousCommentEvidence.length === 0) {
+    return undefined;
+  }
+
+  return compactMetadata({
+    issueSummary: issue.summary,
+    issueDescription,
+    previousComments: previousCommentEvidence
+  });
+}
+
+function commentEvidence(comment: BacklogComment): Record<string, unknown> {
+  return compactMetadata({
+    id: comment.id,
+    author: comment.createdUser?.name,
+    createdAt: comment.created,
+    body: compactText(comment.content ?? "", COMMENT_CONTEXT_BODY_LIMIT)
+  });
+}
+
+function formatContextComment(comment: BacklogComment): string {
+  const author = comment.createdUser?.name ?? "Unknown";
+  const created = comment.created ?? "unknown date";
+  return `- ${created} ${author}: ${compactText(comment.content ?? "", COMMENT_CONTEXT_BODY_LIMIT)}`;
+}
+
+function isBeforeOrSame(left: string | undefined, right: string | undefined): boolean {
+  if (!left || !right) {
+    return true;
+  }
+
+  return Date.parse(left) <= Date.parse(right);
 }
 
 async function backlogGet<T>(
@@ -450,6 +550,11 @@ async function safeResponseText(response: Response): Promise<string> {
 
 function compactResponseBody(value: string): string {
   return value.replace(/\s+/g, " ").trim().slice(0, 300);
+}
+
+function compactText(value: string, maxChars: number): string {
+  const compact = value.replace(/\s+/g, " ").trim();
+  return compact.length > maxChars ? `${compact.slice(0, maxChars)}...` : compact;
 }
 
 function buildIssueUrl(config: BacklogSpaceContext, issueKey: string): string {

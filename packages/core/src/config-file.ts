@@ -12,6 +12,7 @@ import {
 } from "./config.js";
 import type {
   BacklogSpaceConfig,
+  GitHubActionsContext,
   GitHubRepoOwnerSpec,
   GitHubRepoSort,
   GitHubRepoSpec,
@@ -112,6 +113,11 @@ export function buildGitppouConfig(
     }
   }
 
+  const githubActionsContext = resolveGitHubActionsContext(env);
+  if (githubActionsContext) {
+    config.githubActionsContext = githubActionsContext;
+  }
+
   return config;
 }
 
@@ -122,6 +128,21 @@ function getSection(root: RawObject, key: string): RawObject {
   }
 
   return asObject(value, `config.${key}`);
+}
+
+function resolveGitHubActionsContext(env: Env): GitHubActionsContext | undefined {
+  const context = compactObject({
+    actor: env.GITHUB_ACTOR?.trim(),
+    eventName: env.GITHUB_EVENT_NAME?.trim(),
+    refName: env.GITHUB_REF_NAME?.trim(),
+    repository: env.GITHUB_REPOSITORY?.trim(),
+    runId: env.GITHUB_RUN_ID?.trim(),
+    runNumber: env.GITHUB_RUN_NUMBER?.trim(),
+    serverUrl: env.GITHUB_SERVER_URL?.trim(),
+    workflow: env.GITHUB_WORKFLOW?.trim()
+  });
+
+  return Object.keys(context).length > 0 ? context : undefined;
 }
 
 function asObject(value: unknown, pathLabel: string): RawObject {
@@ -423,6 +444,12 @@ function resolveGitHubTokensByOwner(github: RawObject, env: Env): Record<string,
 
   return Object.fromEntries(
     Object.entries(tokenEnvByOwner).map(([owner, envName]) => [owner, requiredEnv(env, envName)])
+  );
+}
+
+function compactObject<T extends Record<string, string | undefined>>(value: T): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(value).filter((entry): entry is [string, string] => typeof entry[1] === "string" && entry[1] !== "")
   );
 }
 

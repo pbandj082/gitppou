@@ -42,11 +42,23 @@ export type GitppouConfig = {
   commitReport: boolean;
   slackNotify: boolean;
   slackWebhookUrl?: string;
+  githubActionsContext?: GitHubActionsContext;
 
   llmProvider: LlmProviderName;
   llmModel: string;
   llmMaxInputChars: number;
   llmStyle: LlmStyle;
+};
+
+export type GitHubActionsContext = {
+  actor?: string;
+  eventName?: string;
+  refName?: string;
+  repository?: string;
+  runId?: string;
+  runNumber?: string;
+  serverUrl?: string;
+  workflow?: string;
 };
 
 export type ActivitySource = "github" | "backlog";
@@ -56,6 +68,7 @@ export type ActivityKind =
   | "pull_request"
   | "review"
   | "comment"
+  | "comment_context"
   | "issue"
   | "status_change"
   | "assigned_issue"

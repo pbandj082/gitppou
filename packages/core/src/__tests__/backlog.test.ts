@@ -366,6 +366,107 @@ describe("fetchBacklogActivities", () => {
       }
     ]);
   });
+
+  it("includes recent Backlog discussion context for user comments", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        const url = new URL(String(input));
+
+        if (url.pathname === "/api/v2/users/myself") {
+          return jsonResponse({
+            id: 123,
+            name: "Admin"
+          });
+        }
+
+        if (url.pathname === "/api/v2/projects") {
+          return jsonResponse([
+            {
+              id: 456,
+              projectKey: "APP",
+              name: "App"
+            }
+          ]);
+        }
+
+        if (url.pathname === "/api/v2/issues" && !url.searchParams.has("assigneeId[]")) {
+          return jsonResponse([
+            {
+              id: 789,
+              issueKey: "APP-1",
+              summary: "Confirm target issue",
+              description: "Please confirm the login behavior.",
+              updated: "2026-07-06T10:00:00+09:00",
+              assignee: {
+                id: 123,
+                name: "Admin"
+              }
+            }
+          ]);
+        }
+
+        if (url.pathname === "/api/v2/issues") {
+          return jsonResponse([]);
+        }
+
+        if (url.pathname === "/api/v2/issues/APP-1/comments") {
+          return jsonResponse([
+            {
+              id: 900,
+              content: "ログイン後に二重遷移しないか確認をお願いします。",
+              created: "2026-07-06T09:00:00+09:00",
+              createdUser: {
+                id: 456,
+                name: "Reviewer"
+              }
+            },
+            {
+              id: 901,
+              content: "確認しました！",
+              created: "2026-07-06T10:00:00+09:00",
+              createdUser: {
+                id: 123,
+                name: "Admin"
+              }
+            }
+          ]);
+        }
+
+        return jsonResponse({}, 404);
+      })
+    );
+
+    await expect(fetchBacklogActivities(baseConfig)).resolves.toMatchObject([
+      {
+        kind: "comment",
+        issueKey: "APP-1",
+        body: "確認しました！",
+        metadata: {
+          commentContext: {
+            issueSummary: "Confirm target issue",
+            previousComments: [
+              {
+                id: 900,
+                author: "Reviewer",
+                createdAt: "2026-07-06T09:00:00+09:00",
+                body: "ログイン後に二重遷移しないか確認をお願いします。"
+              }
+            ]
+          }
+        }
+      },
+      {
+        kind: "comment_context",
+        issueKey: "APP-1",
+        body: expect.stringContaining("ログイン後に二重遷移しないか確認をお願いします。"),
+        metadata: {
+          contextForCommentId: 901,
+          contextCommentIds: [900]
+        }
+      }
+    ]);
+  });
 });
 
 function jsonResponse(body: unknown, status = 200): Response {

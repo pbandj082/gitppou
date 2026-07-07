@@ -33,6 +33,7 @@ export type ReportEvidence = {
 
 export function isUserActionActivity(activity: NormalizedActivity): boolean {
   switch (activity.kind) {
+    case "comment_context":
     case "issue":
     case "assigned_issue":
     case "due_issue":
