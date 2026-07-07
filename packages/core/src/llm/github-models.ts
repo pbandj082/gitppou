@@ -16,6 +16,11 @@ type RefineInput = {
   groups: ActivityGroup[];
 };
 
+type SlackSummaryInput = {
+  config: GitppouConfig;
+  reportMarkdown: string;
+};
+
 const GITHUB_MODELS_ENDPOINT = "https://models.github.ai/inference/chat/completions";
 const GITHUB_API_VERSION = "2026-03-10";
 
@@ -47,24 +52,56 @@ export async function refineWithGitHubModels({
     evidenceJson: truncate(evidenceJson, config.llmMaxInputChars)
   });
 
+  return chatWithGitHubModels({
+    config,
+    prompt,
+    maxTokens: config.llmStyle === "detailed" ? 1800 : 1200,
+    temperature: config.llmStyle === "detailed" ? 0.2 : 0.1
+  });
+}
+
+export async function summarizeSlackWithGitHubModels({
+  config,
+  reportMarkdown
+}: SlackSummaryInput): Promise<string> {
+  const prompt = buildSlackSummaryPrompt({
+    date: config.reportDate,
+    language: config.reportLanguage,
+    reportMarkdown: truncate(reportMarkdown, Math.min(config.llmMaxInputChars, 12000))
+  });
+
+  return chatWithGitHubModels({
+    config,
+    prompt,
+    maxTokens: config.reportLanguage === "ja" ? 240 : 180,
+    temperature: 0.1
+  });
+}
+
+async function chatWithGitHubModels(input: {
+  config: GitppouConfig;
+  prompt: string;
+  maxTokens: number;
+  temperature: number;
+}): Promise<string> {
   const response = await fetch(GITHUB_MODELS_ENDPOINT, {
     method: "POST",
     headers: {
       Accept: "application/vnd.github+json",
-      Authorization: `Bearer ${config.githubToken}`,
+      Authorization: `Bearer ${input.config.githubToken}`,
       "Content-Type": "application/json",
       "X-GitHub-Api-Version": GITHUB_API_VERSION
     },
     body: JSON.stringify({
-      model: config.llmModel,
+      model: input.config.llmModel,
       messages: [
         {
           role: "user",
-          content: prompt
+          content: input.prompt
         }
       ],
-      temperature: config.llmStyle === "detailed" ? 0.2 : 0.1,
-      max_tokens: config.llmStyle === "detailed" ? 1800 : 1200
+      temperature: input.temperature,
+      max_tokens: input.maxTokens
     })
   });
 
@@ -163,6 +200,48 @@ ${input.templateDraft}
 
 User-action evidence and context:
 ${input.evidenceJson}`;
+}
+
+function buildSlackSummaryPrompt(input: {
+  date: string;
+  language: GitppouConfig["reportLanguage"];
+  reportMarkdown: string;
+}): string {
+  if (input.language === "ja") {
+    return `以下の日報本文をSlack通知用に日本語で要約してください。
+
+ルール:
+- 1段落だけで書く
+- 箇条書きにしない
+- 120〜220字程度に収める
+- リンクやURLは書かない
+- 事実にないことは書かない
+- 本日対応したこと、進捗、明日やることの要点を自然な文章でまとめる
+- 詳細は別途リンクされる前提で、細かい活動を列挙しない
+
+日付:
+${input.date}
+
+日報本文:
+${input.reportMarkdown}`;
+  }
+
+  return `Summarize the following daily report for a Slack notification.
+
+Rules:
+- Write exactly one paragraph.
+- Do not use bullets.
+- Keep it around 60-100 words.
+- Do not include links or URLs.
+- Do not add unsupported facts.
+- Summarize the key work completed today, progress, and next actions in natural prose.
+- Assume the full report is linked separately, so do not enumerate every activity.
+
+Date:
+${input.date}
+
+Daily report:
+${input.reportMarkdown}`;
 }
 
 function commentContextForGroup(

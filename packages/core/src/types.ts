@@ -41,6 +41,7 @@ export type GitppouConfig = {
 
   commitReport: boolean;
   slackNotify: boolean;
+  deferSlackNotification?: boolean;
   slackWebhookUrl?: string;
   githubActionsContext?: GitHubActionsContext;
 

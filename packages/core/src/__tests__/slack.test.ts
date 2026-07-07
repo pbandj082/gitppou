@@ -21,7 +21,7 @@ const baseConfig: GitppouConfig = {
 };
 
 describe("generateSlackSummary", () => {
-  it("includes GitHub Actions context when available", () => {
+  it("links to the generated report file when GitHub Actions context is available", () => {
     const summary = generateSlackSummary(
       {
         ...baseConfig,
@@ -36,15 +36,31 @@ describe("generateSlackSummary", () => {
           workflow: "Daily Report"
         }
       },
-      [],
-      "reports/2026-07/2026-07-06.md"
+      ".gitppou/reports/2026-07/2026-07-06.md",
+      [
+        "# 日報 - 2026-07-06",
+        "",
+        "## 本日対応したこと",
+        "",
+        "### APP-1 Login flow",
+        "",
+        "- PRを更新: APP-1 Login flow",
+        "",
+        "## 明日やること",
+        "",
+        "- APP-1 Login flow: ステータス: 処理中"
+      ].join("\n"),
+      "ログイン導線の修正を進め、PR更新と明日の確認事項を整理しました。"
     );
 
-    expect(summary).toContain("実行:");
-    expect(summary).toContain("- 実行者: octocat");
-    expect(summary).toContain("- Workflow: Daily Report #42");
-    expect(summary).toContain("- Repository: owner/repo (main)");
-    expect(summary).toContain("- Event: workflow_dispatch");
-    expect(summary).toContain("- URL: https://github.com/owner/repo/actions/runs/123456789");
+    expect(summary).toContain("日報 2026-07-06");
+    expect(summary).toContain("by octocat / Daily Report #42 / owner/repo (main)");
+    expect(summary).toContain(
+      "詳細: <https://github.com/owner/repo/blob/main/.gitppou/reports/2026-07/2026-07-06.md|.gitppou/reports/2026-07/2026-07-06.md>"
+    );
+    expect(summary).toContain("ログイン導線の修正を進め、PR更新と明日の確認事項を整理しました。");
+    expect(summary).not.toContain("- APP-1 Login flow");
+    expect(summary).not.toContain("actions/runs/123456789");
+    expect(summary).not.toContain("課題・相談:");
   });
 });

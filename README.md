@@ -294,7 +294,7 @@ env:
   SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
 ```
 
-Slack receives a summary, not the full raw activity. When running in GitHub Actions, the summary includes the actor, workflow, repository/ref, event, and workflow run URL. Slack failures are warnings in v1 and do not fail the action.
+Slack receives a short prose summary, not the full raw activity. With `llm.provider: github-models`, the Slack summary is generated from the final report; otherwise Gitppou falls back to a local heading-based summary. When running in GitHub Actions, the summary includes the actor, workflow, repository/ref, and a link to the generated report file in the repository. Slack failures are warnings in v1 and do not fail the action.
 
 ## Commit Behavior
 
