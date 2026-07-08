@@ -8,6 +8,7 @@ import {
   refineWithGitHubModels,
   summarizeSlackWithGitHubModels
 } from "./llm/index.js";
+import { normalizeMarkdownLinks } from "./markdown.js";
 import { groupActivitiesByIssueKey, normalizeActivities } from "./normalize.js";
 import { filterGroupsByUserActions } from "./report-evidence.js";
 import { generateSlackSummary, sendSlackNotification } from "./slack.js";
@@ -34,6 +35,7 @@ export async function generateDailyReport(config: GitppouConfig): Promise<Report
       console.warn(`Gitppou warning: GitHub Models failed; using template report. ${formatError(error)}`);
     }
   }
+  reportMarkdown = normalizeMarkdownLinks(reportMarkdown);
 
   const reportPath = buildReportPath(config.reportDir, config.reportDate);
   await saveReport(reportPath, reportMarkdown);

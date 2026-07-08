@@ -36156,7 +36156,7 @@ exports.visitAsync = visitAsync;
 /* harmony import */ var node_fs_promises__WEBPACK_IMPORTED_MODULE_0__ = __nccwpck_require__(1455);
 /* harmony import */ var node_path__WEBPACK_IMPORTED_MODULE_1__ = __nccwpck_require__(6760);
 /* harmony import */ var _actions_core__WEBPACK_IMPORTED_MODULE_2__ = __nccwpck_require__(4442);
-/* harmony import */ var _gitppou_core__WEBPACK_IMPORTED_MODULE_3__ = __nccwpck_require__(6123);
+/* harmony import */ var _gitppou_core__WEBPACK_IMPORTED_MODULE_3__ = __nccwpck_require__(8075);
 /* harmony import */ var yaml__WEBPACK_IMPORTED_MODULE_4__ = __nccwpck_require__(3328);
 
 
@@ -36243,7 +36243,7 @@ async function git(args) {
 
 __nccwpck_require__.a(__webpack_module__, async (__webpack_handle_async_dependencies__, __webpack_async_result__) => { try {
 /* harmony import */ var _actions_core__WEBPACK_IMPORTED_MODULE_0__ = __nccwpck_require__(4442);
-/* harmony import */ var _gitppou_core__WEBPACK_IMPORTED_MODULE_1__ = __nccwpck_require__(6123);
+/* harmony import */ var _gitppou_core__WEBPACK_IMPORTED_MODULE_1__ = __nccwpck_require__(8075);
 /* harmony import */ var _config_js__WEBPACK_IMPORTED_MODULE_2__ = __nccwpck_require__(9820);
 /* harmony import */ var _git_js__WEBPACK_IMPORTED_MODULE_3__ = __nccwpck_require__(288);
 
@@ -36291,7 +36291,7 @@ __webpack_async_result__();
 
 /***/ }),
 
-/***/ 6123:
+/***/ 8075:
 /***/ ((__unused_webpack___webpack_module__, __webpack_exports__, __nccwpck_require__) => {
 
 
@@ -41887,7 +41887,58 @@ function compactEvidence(evidence) {
     }));
 }
 
+;// CONCATENATED MODULE: ../core/dist/markdown.js
+const URL_PATTERN = /https?:\/\/[A-Za-z0-9\-._~:/?#[\]@!$&'()*+,;=%]+/g;
+function normalizeMarkdownLinks(markdown) {
+    let inFence = false;
+    return markdown
+        .split("\n")
+        .map((line) => {
+        if (/^\s*```/.test(line)) {
+            inFence = !inFence;
+            return line;
+        }
+        return inFence ? line : formatMarkdownInlineText(line);
+    })
+        .join("\n");
+}
+function formatMarkdownInlineText(value) {
+    return value.replace(URL_PATTERN, (url, offset, input) => {
+        if (isMarkdownLinkTarget(input, offset)) {
+            return url;
+        }
+        const { cleanUrl, suffix } = trimUrlSuffix(url);
+        return `[リンク](${markdownLinkUrl(cleanUrl)})${suffix}`;
+    });
+}
+function markdownLinkUrl(value) {
+    return value.replace(/\(/g, "%28").replace(/\)/g, "%29");
+}
+function isMarkdownLinkTarget(input, offset) {
+    if (input[offset - 1] !== "(") {
+        return false;
+    }
+    return /\[[^\]]+\]\($/.test(input.slice(Math.max(0, offset - 200), offset));
+}
+function trimUrlSuffix(url) {
+    let cleanUrl = url;
+    let suffix = "";
+    while (/[.,;:!?]+$/.test(cleanUrl)) {
+        suffix = `${cleanUrl.slice(-1)}${suffix}`;
+        cleanUrl = cleanUrl.slice(0, -1);
+    }
+    while (cleanUrl.endsWith(")") && countChar(cleanUrl, ")") > countChar(cleanUrl, "(")) {
+        suffix = `)${suffix}`;
+        cleanUrl = cleanUrl.slice(0, -1);
+    }
+    return { cleanUrl, suffix };
+}
+function countChar(value, char) {
+    return [...value].filter((current) => current === char).length;
+}
+
 ;// CONCATENATED MODULE: ../core/dist/llm/template.js
+
 
 const LABELS = {
     en: {
@@ -41932,8 +41983,12 @@ function generateTemplateReport({ config, activities, groups }) {
             if (metadataLine) {
                 lines.push(metadataLine, "");
             }
+            const summary = issueSummaryParagraph(group, config.reportLanguage);
+            if (summary) {
+                lines.push(summary, "");
+            }
             for (const activity of group.activities) {
-                lines.push(`- ${describeActivity(activity, config.reportLanguage, descriptionContext)}`);
+                lines.push(...describeActivityLines(activity, config.reportLanguage, descriptionContext));
             }
             lines.push("");
         }
@@ -42015,9 +42070,6 @@ function backlogIssueUrl(url, issueKey) {
 function markdownLinkText(value) {
     return value.replace(/([\\[\]])/g, "\\$1");
 }
-function markdownLinkUrl(value) {
-    return value.replace(/\)/g, "%29");
-}
 function descriptionContextForGroup(group) {
     return {
         ...(group.issueKey === "Unlinked" ? {} : { groupIssueKey: group.issueKey }),
@@ -42079,27 +42131,67 @@ function issuePrefix(activity, context) {
     }
     return `${activity.issueKey}: `;
 }
-function commentText(activity, title, context, language) {
+function describeActivityLines(activity, language, context = {}) {
+    const description = describeActivity(activity, language, context);
+    const details = activityDetailLines(activity, language);
+    if (details.length === 0) {
+        return [`- ${description}`];
+    }
+    return [`- ${description}`, "", ...details, ""];
+}
+function activityDetailLines(activity, language) {
+    if (activity.kind !== "comment") {
+        return [];
+    }
+    const blocks = [];
+    const relatedComments = relatedCommentCandidates(activity).slice(-2);
+    for (const comment of relatedComments) {
+        blocks.push({
+            label: relatedCommentBlockLabel(comment, language),
+            body: shortContext(comment.body)
+        });
+    }
     const body = compactBody(activity.body);
+    if (body) {
+        blocks.push({
+            label: language === "ja" ? "投稿コメント" : "Posted comment",
+            body
+        });
+    }
+    return blocks.flatMap((block, index) => [
+        ...(index > 0 ? [""] : []),
+        `  > **${block.label}**`,
+        `  > ${formatMarkdownInlineText(block.body)}`
+    ]);
+}
+function relatedCommentBlockLabel(comment, language) {
+    const author = speakerName(comment.author) ?? (language === "ja" ? "不明" : "unknown");
+    const createdAt = comment.createdAt ? ` / ${comment.createdAt}` : "";
+    return language === "ja" ? `関連コメント（発言者: ${author}${createdAt}）` : `Related comment (speaker: ${author}${createdAt})`;
+}
+function commentText(activity, title, context, language) {
+    const rawBody = compactBody(activity.body);
+    const fallbackText = formatMarkdownInlineText(title);
     const target = commentTarget(activity, title, context, language);
-    const isConfirmation = body ? isConfirmationComment(body) : false;
+    const isConfirmation = rawBody ? isConfirmationComment(rawBody) : false;
     const replyTarget = commentReplyTarget(activity, language, isConfirmation);
+    const inlineBody = rawBody ? "" : `: ${fallbackText}`;
     if (language === "ja") {
         if (isConfirmation) {
-            return `${replyTarget ?? target}確認コメントを追加: ${body}`;
+            return `${replyTarget ?? target}確認コメントを追加${inlineBody}`;
         }
         if (replyTarget) {
-            return `${replyTarget}コメントを追加: ${body ?? title}`;
+            return `${replyTarget}コメントを追加${inlineBody}`;
         }
-        return `${target}コメントを追加: ${body ?? title}`;
+        return `${target}コメントを追加${inlineBody}`;
     }
     if (isConfirmation) {
-        return `Added a confirmation comment ${replyTarget ?? target}: ${body}`;
+        return `Added a confirmation comment ${replyTarget ?? target}${inlineBody}`;
     }
     if (replyTarget) {
-        return `Commented ${replyTarget}: ${body ?? title}`;
+        return `Commented ${replyTarget}${inlineBody}`;
     }
-    return `Commented ${target}: ${body ?? title}`;
+    return `Commented ${target}${inlineBody}`;
 }
 function commentTarget(activity, title, context, language) {
     if (activity.issueKey && activity.issueKey === context.groupIssueKey) {
@@ -42112,7 +42204,7 @@ function commentTarget(activity, title, context, language) {
     return language === "ja" ? "" : "on the activity";
 }
 function commentReplyTarget(activity, language, isConfirmation) {
-    const previousComment = latestPreviousComment(activity);
+    const previousComment = relatedPreviousComment(activity, isConfirmation);
     if (!previousComment) {
         return undefined;
     }
@@ -42122,59 +42214,82 @@ function commentReplyTarget(activity, language, isConfirmation) {
             if (requestTarget) {
                 return `${previousCommentSpeakerPrefix(previousComment, language)}の確認依頼「${requestTarget}」に対して`;
             }
-            return `${previousCommentReference(previousComment, language)}への`;
+            return `${previousCommentSpeakerPrefix(previousComment, language)}への`;
         }
-        return `${previousCommentReference(previousComment, language)}への返信として`;
+        return `${previousCommentSpeakerPrefix(previousComment, language)}への返信として`;
     }
     if (isConfirmation) {
         const requestTarget = confirmationRequestTarget(previousComment.body);
         if (requestTarget) {
             return `for the confirmation request from ${speakerName(previousComment.author) ?? "unknown"} about "${requestTarget}"`;
         }
-        return `in response to ${previousCommentReference(previousComment, language)}`;
+        return `in response to ${previousCommentSpeakerPrefix(previousComment, language)}`;
     }
-    return `in reply to ${previousCommentReference(previousComment, language)}`;
+    return `in reply to ${previousCommentSpeakerPrefix(previousComment, language)}`;
 }
-function latestPreviousComment(activity) {
+function relatedPreviousComment(activity, isConfirmation) {
+    const previousComments = relatedCommentCandidates(activity);
+    if (previousComments.length === 0) {
+        return undefined;
+    }
+    if (isConfirmation) {
+        const confirmationRequestComment = [...previousComments]
+            .reverse()
+            .find((comment) => confirmationRequestTarget(comment.body));
+        if (confirmationRequestComment) {
+            return confirmationRequestComment;
+        }
+    }
+    return previousComments[previousComments.length - 1];
+}
+function relatedCommentCandidates(activity) {
+    const previousComments = previousCommentContexts(activity);
+    const currentAuthor = typeof activity.metadata?.author === "string" ? speakerName(activity.metadata.author) : undefined;
+    if (!currentAuthor) {
+        return previousComments;
+    }
+    const nonSelfComments = previousComments.filter((comment) => speakerName(comment.author) !== currentAuthor);
+    return nonSelfComments.length > 0 ? nonSelfComments : previousComments;
+}
+function previousCommentContexts(activity) {
     const commentContext = activity.metadata?.commentContext;
     if (!isRecord(commentContext)) {
-        return undefined;
+        return [];
     }
     const previousComments = commentContext.previousComments;
     if (!Array.isArray(previousComments)) {
-        return undefined;
+        return [];
     }
-    for (let index = previousComments.length - 1; index >= 0; index -= 1) {
-        const previousComment = previousComments[index];
+    return previousComments
+        .map((previousComment) => {
         if (!isRecord(previousComment) || typeof previousComment.body !== "string") {
-            continue;
+            return undefined;
         }
         const body = stripMarkdownBreaks(previousComment.body);
-        if (body) {
-            return {
-                ...(typeof previousComment.author === "string" && previousComment.author.trim()
-                    ? { author: previousComment.author.trim() }
-                    : {}),
-                body
-            };
+        if (!body) {
+            return undefined;
         }
-    }
-    return undefined;
-}
-function previousCommentReference(comment, language) {
-    const speaker = previousCommentSpeakerPrefix(comment, language);
-    const body = shortContext(comment.body);
-    if (language === "ja") {
-        return `${speaker} / 本文: 「${body}」`;
-    }
-    return `${speaker} / body: "${body}"`;
+        return {
+            ...(typeof previousComment.id === "string" || typeof previousComment.id === "number"
+                ? { id: previousComment.id }
+                : {}),
+            ...(typeof previousComment.author === "string" && previousComment.author.trim()
+                ? { author: previousComment.author.trim() }
+                : {}),
+            ...(typeof previousComment.createdAt === "string" && previousComment.createdAt.trim()
+                ? { createdAt: previousComment.createdAt.trim() }
+                : {}),
+            body
+        };
+    })
+        .filter((comment) => Boolean(comment));
 }
 function previousCommentSpeakerPrefix(comment, language) {
     const author = speakerName(comment.author);
     if (language === "ja") {
-        return `直前コメント（発言者: ${author ?? "不明"}）`;
+        return `関連コメント（発言者: ${author ?? "不明"}）`;
     }
-    return `the previous comment by ${author ?? "unknown"}`;
+    return `the related comment by ${author ?? "unknown"}`;
 }
 function speakerName(author) {
     const name = author?.replace(/^@+/, "").trim();
@@ -42216,6 +42331,155 @@ function issueMetadataLine(group, language) {
         ];
     const line = parts.filter((part) => Boolean(part)).join(" / ");
     return line || undefined;
+}
+function issueSummaryParagraph(group, language) {
+    const githubSummary = issueSourceSummary(group.activities, "github", group.issueKey, language);
+    const backlogSummary = issueSourceSummary(group.activities, "backlog", group.issueKey, language);
+    if (!githubSummary && !backlogSummary) {
+        return undefined;
+    }
+    if (language === "ja") {
+        const clauses = [githubSummary, backlogSummary].filter((value) => Boolean(value));
+        const subject = group.issueKey === "Unlinked" ? "この項目" : "この課題";
+        return `${subject}では、${clauses.join("、")}を行いました。`;
+    }
+    const clauses = [githubSummary, backlogSummary].filter((value) => Boolean(value));
+    const subject = group.issueKey === "Unlinked" ? "these unlinked activities" : "this issue";
+    return `For ${subject}, work included ${clauses.join(", plus ")}.`;
+}
+function issueSourceSummary(activities, source, issueKey, language) {
+    const sourceActivities = activities.filter((activity) => activity.source === source);
+    const terms = issueSummaryTerms(sourceActivities, language);
+    if (terms.length === 0) {
+        return undefined;
+    }
+    const topics = issueSummaryTopics(sourceActivities, issueKey, language);
+    const sourceLabel = source === "github" ? "GitHub" : "Backlog";
+    if (language === "ja") {
+        const topicPrefix = topics.length > 0 ? `${quoteTopics(topics, language)}を中心に` : "";
+        return `${sourceLabel}で${topicPrefix}${joinJapaneseTerms(terms)}`;
+    }
+    const topicSuffix = topics.length > 0 ? ` around ${quoteTopics(topics, language)}` : "";
+    return `${sourceLabel} ${joinEnglishTerms(terms)}${topicSuffix}`;
+}
+function issueSummaryTerms(activities, language) {
+    const kinds = new Set(activities.map((activity) => activity.kind));
+    if (language === "ja") {
+        return [
+            kinds.has("commit") ? "commit作成" : undefined,
+            kinds.has("pull_request") ? "PR更新" : undefined,
+            kinds.has("review") ? "PRレビュー" : undefined,
+            kinds.has("comment") ? "コメント対応" : undefined,
+            kinds.has("status_change") ? "ステータス変更" : undefined
+        ].filter((value) => Boolean(value));
+    }
+    return [
+        kinds.has("commit") ? "commits" : undefined,
+        kinds.has("pull_request") ? "pull request updates" : undefined,
+        kinds.has("review") ? "pull request reviews" : undefined,
+        kinds.has("comment") ? "comments" : undefined,
+        kinds.has("status_change") ? "status changes" : undefined
+    ].filter((value) => Boolean(value));
+}
+function issueSummaryTopics(activities, issueKey, language) {
+    const unique = new Map();
+    for (const activity of activities) {
+        const topic = activitySummaryTopic(activity, issueKey, language);
+        if (!topic) {
+            continue;
+        }
+        const key = topic.toLowerCase();
+        if (!unique.has(key)) {
+            unique.set(key, topic);
+        }
+    }
+    return [...unique.values()].slice(0, 2);
+}
+function activitySummaryTopic(activity, issueKey, language) {
+    switch (activity.kind) {
+        case "commit":
+        case "pull_request":
+        case "review":
+            return titleSummaryTopic(activity.title, issueKey);
+        case "comment": {
+            const isConfirmation = activity.body ? isConfirmationComment(activity.body) : false;
+            const previousComment = relatedPreviousComment(activity, isConfirmation);
+            if (previousComment) {
+                const previousTopic = textSummaryTopic(confirmationRequestTarget(previousComment.body) ?? previousComment.body, issueKey);
+                if (previousTopic) {
+                    return language === "ja" ? `${previousTopic}への返信` : `reply to ${previousTopic}`;
+                }
+            }
+            return textSummaryTopic(activity.body ?? activity.title, issueKey);
+        }
+        case "status_change":
+            return statusChangeSummaryTopic(activity, language);
+        default:
+            return undefined;
+    }
+}
+function titleSummaryTopic(title, issueKey) {
+    const topic = textSummaryTopic(title, issueKey);
+    if (!topic || isLowValueTitleTopic(topic)) {
+        return undefined;
+    }
+    return topic;
+}
+function textSummaryTopic(value, issueKey) {
+    const cleaned = stripLeadingIssueKey(stripConventionalCommitPrefix(cleanSummaryText(value)), issueKey);
+    return cleaned ? shortSummaryTopic(cleaned) : undefined;
+}
+function statusChangeSummaryTopic(activity, language) {
+    const originalValue = metadataString(activity, "originalValue");
+    const newValue = metadataString(activity, "newValue");
+    if (originalValue && newValue) {
+        return language === "ja"
+            ? `ステータスを${originalValue}から${newValue}へ変更`
+            : `status change from "${originalValue}" to "${newValue}"`;
+    }
+    if (newValue) {
+        return language === "ja" ? `ステータスを${newValue}へ変更` : `status change to "${newValue}"`;
+    }
+    return undefined;
+}
+function cleanSummaryText(value) {
+    return stripMarkdownBreaks(value)
+        .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+        .replace(/https?:\/\/\S+/g, "")
+        .replace(/@[^\s　]+/g, "")
+        .replace(/\s+/g, " ")
+        .trim();
+}
+function stripConventionalCommitPrefix(value) {
+    return value.replace(/^(?:feat|fix|docs|chore|refactor|test|style|perf|ci|build|revert)(?:\([^)]+\))?!?:\s*/i, "");
+}
+function shortSummaryTopic(value) {
+    const compact = value.replace(/[。.!！]+$/u, "").trim();
+    return compact.length > 72 ? `${compact.slice(0, 72)}...` : compact;
+}
+function isLowValueTitleTopic(value) {
+    return (/^merge pull request #\d+/i.test(value) ||
+        /^merge branch/i.test(value) ||
+        /^(?:feature|fix|hotfix|release)[/\s:_-]+[a-z0-9_]+[\s_-]*\d+$/i.test(value));
+}
+function quoteTopics(values, language) {
+    const quoted = values.map((value) => (language === "ja" ? `「${value}」` : `"${value}"`));
+    return language === "ja" ? joinJapaneseTerms(quoted) : joinEnglishTerms(quoted);
+}
+function joinJapaneseTerms(values) {
+    if (values.length <= 1) {
+        return values[0] ?? "";
+    }
+    return `${values.slice(0, -1).join("、")}と${values[values.length - 1]}`;
+}
+function joinEnglishTerms(values) {
+    if (values.length <= 1) {
+        return values[0] ?? "";
+    }
+    if (values.length === 2) {
+        return `${values[0]} and ${values[1]}`;
+    }
+    return `${values.slice(0, -1).join(", ")}, and ${values[values.length - 1]}`;
 }
 function progressLines(activities, groups, config) {
     const assignedIssues = assignedProgressActivities(activities, config.reportDate);
@@ -42555,7 +42819,7 @@ async function refineWithGitHubModels({ config, templateDraft, activities, group
     return chatWithGitHubModels({
         config,
         prompt,
-        maxTokens: config.llmStyle === "detailed" ? 1800 : 1200,
+        maxTokens: config.llmStyle === "detailed" ? 6000 : 4000,
         temperature: config.llmStyle === "detailed" ? 0.2 : 0.1
     });
 }
@@ -42597,9 +42861,14 @@ async function chatWithGitHubModels(input) {
         throw new Error(`GitHub Models request failed with status ${response.status}.`);
     }
     const data = (await response.json());
-    const content = data.choices?.[0]?.message?.content?.trim();
+    const choice = data.choices?.[0];
+    const finishReason = choice?.finish_reason;
+    const content = choice?.message?.content?.trim();
     if (!content) {
         throw new Error("GitHub Models returned an empty response.");
+    }
+    if (finishReason && finishReason !== "stop") {
+        throw new Error(`GitHub Models response was incomplete. finish_reason=${finishReason}.`);
     }
     return content;
 }
@@ -42616,16 +42885,20 @@ function buildPrompt(input) {
 - Backlog課題キーを優先して整理する
 - GitHubのcommit/PRとBacklog課題が同じ課題キーを含む場合は同じ項目にまとめる
 - テンプレート日報のBacklog課題見出しにリンクが含まれる場合は、その見出しリンクを維持する
+- 各課題見出しの下では、メタ情報の後、アクティビティ箇条書きの前に1文の自然文要約を置く
+- 要約文はcommitメッセージ、PRタイトル、Backlogコメント本文、直前コメント文脈から「何について対応したか」を具体化し、activity種別だけの説明で終わらせない
+- URLは必ずMarkdownリンク（例: [リンク](https://example.com)）として出力し、生URLのまま書かない
 - 「userActions」にある当日ユーザー本人の行動だけを「本日対応したこと」に書く
 - 「contextOnly」は直近の流れや課題の背景を説明するためだけに使い、ユーザー本人の作業として書かない
 - Backlogの「comment_context」は、ユーザーコメントが何への返信・確認なのかを判断するために使う
-- Backlogのcomment活動にmetadata.commentContext.previousCommentsがある場合は、そのコメント専用の直前文脈として最優先で読む
-- 「確認しました」「ありがとうございます」「対応しました」のような短いコメントは、直前コメントから確認依頼・レビュー依頼・質問・指摘の対象が分かる場合だけ、その対象を含めて書く
+- Backlogのcomment活動にmetadata.commentContext.previousCommentsがある場合は、直前コメントだけに限定せず、その中からユーザーコメントと関係が最も強い確認依頼・質問・指摘・レビュー依頼を選ぶ
+- 「確認しました」「ありがとうございます」「対応しました」のような短いコメントは、関連コメント候補から確認依頼・レビュー依頼・質問・指摘の対象が分かる場合だけ、その対象を含めて書く
 - 確認コメントや返信を書く場合は、分かる範囲で「何を確認したか」「何に返信したか」が伝わる表現にする
-- テンプレート日報に直前コメントへの返信対象が具体的に書かれている場合は、汎用表現に戻さず維持する
-- 直前コメントの発言者は「発言者: 名前」のようにラベルで示し、本文中の@メンションと混同しない表現にする
+- テンプレート日報に関連コメントへの返信対象が具体的に書かれている場合は、汎用表現に戻さず維持する
+- 関連コメントの発言者は「発言者: 名前」のようにラベルで示し、本文中の@メンションと混同しない表現にする
 - comment_contextから対象が分かる場合は、「この課題について確認コメント」のような汎用表現のままにしない
 - ただしcomment_contextに根拠がない対象や意図は推測で書かない
+- コメントの根拠や関連文脈を見せる場合は、箇条書き項目の下に空行を入れ、2スペースインデントしたMarkdown引用ブロックを使って読みやすくする
 - 種別、カテゴリーなどのmetadataは文脈として使い、ユーザー本人の作業として扱わない
 - GitHub PRのmetadata.additions/deletions/changedFilesはPR全体の差分サマリとして扱い、テンプレートに表示されている場合は維持する
 - Backlogの「issue」「assigned_issue」「due_issue」は、それだけではユーザー本人の作業として扱わない
@@ -42654,16 +42927,20 @@ Rules:
 - Group work by Backlog issue key when possible.
 - If GitHub commits/PRs and Backlog issues share the same issue key, merge them into the same section.
 - If template Backlog issue headings contain links, preserve those heading links.
+- Under each issue heading, keep a one-sentence natural-language summary after metadata and before activity bullets.
+- Make each summary concrete by using commit messages, PR titles, Backlog comment bodies, and previous-comment context; do not summarize only by activity type.
+- Always render URLs as Markdown links such as [link](https://example.com); do not emit raw URLs.
 - Write "Work completed today" only from entries in "userActions".
 - Use "contextOnly" only to explain recent flow or issue background. Do not present it as work done by the user.
 - Use Backlog "comment_context" entries to infer what a user comment confirms or replies to.
-- If a Backlog comment action has metadata.commentContext.previousComments, treat it as the direct prior context for that specific comment.
+- If a Backlog comment action has metadata.commentContext.previousComments, do not assume only the immediately previous comment is related; choose the most relevant request, question, concern, or review from that context.
 - For short comments such as "confirmed", "thanks", or "done", include the request, review, question, or concern being answered only when the previous comments support it.
 - When describing confirmation comments or replies, include what was confirmed or replied to when the context supports it.
 - If the template report already describes a specific reply target from a previous comment, preserve that specificity instead of reverting to generic phrasing.
-- Label the previous comment speaker as "speaker: name" or equivalent; do not make the speaker look like a body mention.
+- Label the related comment speaker as "speaker: name" or equivalent; do not make the speaker look like a body mention.
 - If comment_context identifies the target, do not keep generic phrasing such as "commented on this issue".
 - Do not infer a target or intent that is not supported by comment_context.
+- When showing comment evidence or related context, use a blank line below the bullet and a two-space-indented Markdown blockquote for readability.
 - Use metadata such as issue type and categories only as context. Do not present metadata as user work.
 - Treat GitHub PR metadata.additions/deletions/changedFiles as whole-PR diff stats, and preserve them when the template displays them.
 - Do not treat Backlog "issue", "assigned_issue", or "due_issue" entries as user work by themselves.
@@ -42878,7 +43155,7 @@ function generateSlackSummary(config, reportPath, reportMarkdown, summaryText) {
     const detailsLabel = isJapanese ? "詳細" : "Details";
     const contextLine = githubActionsContextLine(config.githubActionsContext);
     const details = reportDetails(reportPath, config.githubActionsContext);
-    const summary = cleanSummaryText(summaryText) ?? localReportSummary(reportMarkdown, config.reportLanguage);
+    const summary = slack_cleanSummaryText(summaryText) ?? localReportSummary(reportMarkdown, config.reportLanguage);
     const lines = [
         title,
         ...(contextLine ? [contextLine] : []),
@@ -42913,7 +43190,7 @@ function githubReportFileUrl(reportPath, context) {
 function encodePath(value) {
     return value.split("/").map(encodeURIComponent).join("/");
 }
-function cleanSummaryText(value) {
+function slack_cleanSummaryText(value) {
     const compact = value?.replace(/\s+/g, " ").trim();
     return compact || undefined;
 }
@@ -43005,6 +43282,7 @@ function slack_truncate(value, maxChars) {
 
 
 
+
 async function generateDailyReport(config) {
     const [githubActivities, backlogActivities] = await fetchActivities(config);
     const backlogProjectKeys = config.backlogSpaces.flatMap((space) => space.projectKeys);
@@ -43026,6 +43304,7 @@ async function generateDailyReport(config) {
             console.warn(`Gitppou warning: GitHub Models failed; using template report. ${formatError(error)}`);
         }
     }
+    reportMarkdown = normalizeMarkdownLinks(reportMarkdown);
     const reportPath = buildReportPath(config.reportDir, config.reportDate);
     await saveReport(reportPath, reportMarkdown);
     const slackSummaryText = await generateSlackSummaryText(config, reportMarkdown);

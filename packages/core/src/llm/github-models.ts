@@ -3,6 +3,7 @@ import type { ActivityGroup, GitppouConfig, NormalizedActivity } from "../types.
 
 type GitHubModelsResponse = {
   choices?: Array<{
+    finish_reason?: string | null;
     message?: {
       content?: string;
     };
@@ -55,7 +56,7 @@ export async function refineWithGitHubModels({
   return chatWithGitHubModels({
     config,
     prompt,
-    maxTokens: config.llmStyle === "detailed" ? 1800 : 1200,
+    maxTokens: config.llmStyle === "detailed" ? 6000 : 4000,
     temperature: config.llmStyle === "detailed" ? 0.2 : 0.1
   });
 }
@@ -110,10 +111,16 @@ async function chatWithGitHubModels(input: {
   }
 
   const data = (await response.json()) as GitHubModelsResponse;
-  const content = data.choices?.[0]?.message?.content?.trim();
+  const choice = data.choices?.[0];
+  const finishReason = choice?.finish_reason;
+  const content = choice?.message?.content?.trim();
 
   if (!content) {
     throw new Error("GitHub Models returned an empty response.");
+  }
+
+  if (finishReason && finishReason !== "stop") {
+    throw new Error(`GitHub Models response was incomplete. finish_reason=${finishReason}.`);
   }
 
   return content;
@@ -137,16 +144,20 @@ function buildPrompt(input: {
 - Backlog課題キーを優先して整理する
 - GitHubのcommit/PRとBacklog課題が同じ課題キーを含む場合は同じ項目にまとめる
 - テンプレート日報のBacklog課題見出しにリンクが含まれる場合は、その見出しリンクを維持する
+- 各課題見出しの下では、メタ情報の後、アクティビティ箇条書きの前に1文の自然文要約を置く
+- 要約文はcommitメッセージ、PRタイトル、Backlogコメント本文、直前コメント文脈から「何について対応したか」を具体化し、activity種別だけの説明で終わらせない
+- URLは必ずMarkdownリンク（例: [リンク](https://example.com)）として出力し、生URLのまま書かない
 - 「userActions」にある当日ユーザー本人の行動だけを「本日対応したこと」に書く
 - 「contextOnly」は直近の流れや課題の背景を説明するためだけに使い、ユーザー本人の作業として書かない
 - Backlogの「comment_context」は、ユーザーコメントが何への返信・確認なのかを判断するために使う
-- Backlogのcomment活動にmetadata.commentContext.previousCommentsがある場合は、そのコメント専用の直前文脈として最優先で読む
-- 「確認しました」「ありがとうございます」「対応しました」のような短いコメントは、直前コメントから確認依頼・レビュー依頼・質問・指摘の対象が分かる場合だけ、その対象を含めて書く
+- Backlogのcomment活動にmetadata.commentContext.previousCommentsがある場合は、直前コメントだけに限定せず、その中からユーザーコメントと関係が最も強い確認依頼・質問・指摘・レビュー依頼を選ぶ
+- 「確認しました」「ありがとうございます」「対応しました」のような短いコメントは、関連コメント候補から確認依頼・レビュー依頼・質問・指摘の対象が分かる場合だけ、その対象を含めて書く
 - 確認コメントや返信を書く場合は、分かる範囲で「何を確認したか」「何に返信したか」が伝わる表現にする
-- テンプレート日報に直前コメントへの返信対象が具体的に書かれている場合は、汎用表現に戻さず維持する
-- 直前コメントの発言者は「発言者: 名前」のようにラベルで示し、本文中の@メンションと混同しない表現にする
+- テンプレート日報に関連コメントへの返信対象が具体的に書かれている場合は、汎用表現に戻さず維持する
+- 関連コメントの発言者は「発言者: 名前」のようにラベルで示し、本文中の@メンションと混同しない表現にする
 - comment_contextから対象が分かる場合は、「この課題について確認コメント」のような汎用表現のままにしない
 - ただしcomment_contextに根拠がない対象や意図は推測で書かない
+- コメントの根拠や関連文脈を見せる場合は、箇条書き項目の下に空行を入れ、2スペースインデントしたMarkdown引用ブロックを使って読みやすくする
 - 種別、カテゴリーなどのmetadataは文脈として使い、ユーザー本人の作業として扱わない
 - GitHub PRのmetadata.additions/deletions/changedFilesはPR全体の差分サマリとして扱い、テンプレートに表示されている場合は維持する
 - Backlogの「issue」「assigned_issue」「due_issue」は、それだけではユーザー本人の作業として扱わない
@@ -176,16 +187,20 @@ Rules:
 - Group work by Backlog issue key when possible.
 - If GitHub commits/PRs and Backlog issues share the same issue key, merge them into the same section.
 - If template Backlog issue headings contain links, preserve those heading links.
+- Under each issue heading, keep a one-sentence natural-language summary after metadata and before activity bullets.
+- Make each summary concrete by using commit messages, PR titles, Backlog comment bodies, and previous-comment context; do not summarize only by activity type.
+- Always render URLs as Markdown links such as [link](https://example.com); do not emit raw URLs.
 - Write "Work completed today" only from entries in "userActions".
 - Use "contextOnly" only to explain recent flow or issue background. Do not present it as work done by the user.
 - Use Backlog "comment_context" entries to infer what a user comment confirms or replies to.
-- If a Backlog comment action has metadata.commentContext.previousComments, treat it as the direct prior context for that specific comment.
+- If a Backlog comment action has metadata.commentContext.previousComments, do not assume only the immediately previous comment is related; choose the most relevant request, question, concern, or review from that context.
 - For short comments such as "confirmed", "thanks", or "done", include the request, review, question, or concern being answered only when the previous comments support it.
 - When describing confirmation comments or replies, include what was confirmed or replied to when the context supports it.
 - If the template report already describes a specific reply target from a previous comment, preserve that specificity instead of reverting to generic phrasing.
-- Label the previous comment speaker as "speaker: name" or equivalent; do not make the speaker look like a body mention.
+- Label the related comment speaker as "speaker: name" or equivalent; do not make the speaker look like a body mention.
 - If comment_context identifies the target, do not keep generic phrasing such as "commented on this issue".
 - Do not infer a target or intent that is not supported by comment_context.
+- When showing comment evidence or related context, use a blank line below the bullet and a two-space-indented Markdown blockquote for readability.
 - Use metadata such as issue type and categories only as context. Do not present metadata as user work.
 - Treat GitHub PR metadata.additions/deletions/changedFiles as whole-PR diff stats, and preserve them when the template displays them.
 - Do not treat Backlog "issue", "assigned_issue", or "due_issue" entries as user work by themselves.

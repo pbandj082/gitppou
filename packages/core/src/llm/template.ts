@@ -1,4 +1,5 @@
 import { filterGroupsByUserActions } from "../report-evidence.js";
+import { formatMarkdownInlineText, markdownLinkUrl } from "../markdown.js";
 import type { ActivityGroup, GitppouConfig, NormalizedActivity } from "../types.js";
 
 type TemplateReportInput = {
@@ -69,8 +70,12 @@ export function generateTemplateReport({ config, activities, groups }: TemplateR
       if (metadataLine) {
         lines.push(metadataLine, "");
       }
+      const summary = issueSummaryParagraph(group, config.reportLanguage);
+      if (summary) {
+        lines.push(summary, "");
+      }
       for (const activity of group.activities) {
-        lines.push(`- ${describeActivity(activity, config.reportLanguage, descriptionContext)}`);
+        lines.push(...describeActivityLines(activity, config.reportLanguage, descriptionContext));
       }
       lines.push("");
     }
@@ -167,10 +172,6 @@ function markdownLinkText(value: string): string {
   return value.replace(/([\\[\]])/g, "\\$1");
 }
 
-function markdownLinkUrl(value: string): string {
-  return value.replace(/\)/g, "%29");
-}
-
 function descriptionContextForGroup(group: ActivityGroup): ActivityDescriptionContext {
   return {
     ...(group.issueKey === "Unlinked" ? {} : { groupIssueKey: group.issueKey }),
@@ -243,38 +244,96 @@ function issuePrefix(activity: NormalizedActivity, context: ActivityDescriptionC
   return `${activity.issueKey}: `;
 }
 
+function describeActivityLines(
+  activity: NormalizedActivity,
+  language: GitppouConfig["reportLanguage"],
+  context: ActivityDescriptionContext = {}
+): string[] {
+  const description = describeActivity(activity, language, context);
+  const details = activityDetailLines(activity, language);
+
+  if (details.length === 0) {
+    return [`- ${description}`];
+  }
+
+  return [`- ${description}`, "", ...details, ""];
+}
+
+function activityDetailLines(
+  activity: NormalizedActivity,
+  language: GitppouConfig["reportLanguage"]
+): string[] {
+  if (activity.kind !== "comment") {
+    return [];
+  }
+
+  const blocks: Array<{ label: string; body: string }> = [];
+  const relatedComments = relatedCommentCandidates(activity).slice(-2);
+  for (const comment of relatedComments) {
+    blocks.push({
+      label: relatedCommentBlockLabel(comment, language),
+      body: shortContext(comment.body)
+    });
+  }
+
+  const body = compactBody(activity.body);
+  if (body) {
+    blocks.push({
+      label: language === "ja" ? "投稿コメント" : "Posted comment",
+      body
+    });
+  }
+
+  return blocks.flatMap((block, index) => [
+    ...(index > 0 ? [""] : []),
+    `  > **${block.label}**`,
+    `  > ${formatMarkdownInlineText(block.body)}`
+  ]);
+}
+
+function relatedCommentBlockLabel(
+  comment: PreviousCommentContext,
+  language: GitppouConfig["reportLanguage"]
+): string {
+  const author = speakerName(comment.author) ?? (language === "ja" ? "不明" : "unknown");
+  const createdAt = comment.createdAt ? ` / ${comment.createdAt}` : "";
+  return language === "ja" ? `関連コメント（発言者: ${author}${createdAt}）` : `Related comment (speaker: ${author}${createdAt})`;
+}
+
 function commentText(
   activity: NormalizedActivity,
   title: string,
   context: ActivityDescriptionContext,
   language: GitppouConfig["reportLanguage"]
 ): string {
-  const body = compactBody(activity.body);
+  const rawBody = compactBody(activity.body);
+  const fallbackText = formatMarkdownInlineText(title);
   const target = commentTarget(activity, title, context, language);
-  const isConfirmation = body ? isConfirmationComment(body) : false;
+  const isConfirmation = rawBody ? isConfirmationComment(rawBody) : false;
   const replyTarget = commentReplyTarget(activity, language, isConfirmation);
+  const inlineBody = rawBody ? "" : `: ${fallbackText}`;
 
   if (language === "ja") {
     if (isConfirmation) {
-      return `${replyTarget ?? target}確認コメントを追加: ${body}`;
+      return `${replyTarget ?? target}確認コメントを追加${inlineBody}`;
     }
 
     if (replyTarget) {
-      return `${replyTarget}コメントを追加: ${body ?? title}`;
+      return `${replyTarget}コメントを追加${inlineBody}`;
     }
 
-    return `${target}コメントを追加: ${body ?? title}`;
+    return `${target}コメントを追加${inlineBody}`;
   }
 
   if (isConfirmation) {
-    return `Added a confirmation comment ${replyTarget ?? target}: ${body}`;
+    return `Added a confirmation comment ${replyTarget ?? target}${inlineBody}`;
   }
 
   if (replyTarget) {
-    return `Commented ${replyTarget}: ${body ?? title}`;
+    return `Commented ${replyTarget}${inlineBody}`;
   }
 
-  return `Commented ${target}: ${body ?? title}`;
+  return `Commented ${target}${inlineBody}`;
 }
 
 function commentTarget(
@@ -300,7 +359,7 @@ function commentReplyTarget(
   language: GitppouConfig["reportLanguage"],
   isConfirmation: boolean
 ): string | undefined {
-  const previousComment = latestPreviousComment(activity);
+  const previousComment = relatedPreviousComment(activity, isConfirmation);
   if (!previousComment) {
     return undefined;
   }
@@ -312,10 +371,10 @@ function commentReplyTarget(
         return `${previousCommentSpeakerPrefix(previousComment, language)}の確認依頼「${requestTarget}」に対して`;
       }
 
-      return `${previousCommentReference(previousComment, language)}への`;
+      return `${previousCommentSpeakerPrefix(previousComment, language)}への`;
     }
 
-    return `${previousCommentReference(previousComment, language)}への返信として`;
+    return `${previousCommentSpeakerPrefix(previousComment, language)}への返信として`;
   }
 
   if (isConfirmation) {
@@ -324,60 +383,87 @@ function commentReplyTarget(
       return `for the confirmation request from ${speakerName(previousComment.author) ?? "unknown"} about "${requestTarget}"`;
     }
 
-    return `in response to ${previousCommentReference(previousComment, language)}`;
+    return `in response to ${previousCommentSpeakerPrefix(previousComment, language)}`;
   }
 
-  return `in reply to ${previousCommentReference(previousComment, language)}`;
+  return `in reply to ${previousCommentSpeakerPrefix(previousComment, language)}`;
 }
 
 type PreviousCommentContext = {
+  id?: string | number;
   author?: string;
+  createdAt?: string;
   body: string;
 };
 
-function latestPreviousComment(activity: NormalizedActivity): PreviousCommentContext | undefined {
+function relatedPreviousComment(
+  activity: NormalizedActivity,
+  isConfirmation: boolean
+): PreviousCommentContext | undefined {
+  const previousComments = relatedCommentCandidates(activity);
+  if (previousComments.length === 0) {
+    return undefined;
+  }
+
+  if (isConfirmation) {
+    const confirmationRequestComment = [...previousComments]
+      .reverse()
+      .find((comment) => confirmationRequestTarget(comment.body));
+    if (confirmationRequestComment) {
+      return confirmationRequestComment;
+    }
+  }
+
+  return previousComments[previousComments.length - 1];
+}
+
+function relatedCommentCandidates(activity: NormalizedActivity): PreviousCommentContext[] {
+  const previousComments = previousCommentContexts(activity);
+  const currentAuthor = typeof activity.metadata?.author === "string" ? speakerName(activity.metadata.author) : undefined;
+  if (!currentAuthor) {
+    return previousComments;
+  }
+
+  const nonSelfComments = previousComments.filter((comment) => speakerName(comment.author) !== currentAuthor);
+  return nonSelfComments.length > 0 ? nonSelfComments : previousComments;
+}
+
+function previousCommentContexts(activity: NormalizedActivity): PreviousCommentContext[] {
   const commentContext = activity.metadata?.commentContext;
   if (!isRecord(commentContext)) {
-    return undefined;
+    return [];
   }
 
   const previousComments = commentContext.previousComments;
   if (!Array.isArray(previousComments)) {
-    return undefined;
+    return [];
   }
 
-  for (let index = previousComments.length - 1; index >= 0; index -= 1) {
-    const previousComment = previousComments[index];
-    if (!isRecord(previousComment) || typeof previousComment.body !== "string") {
-      continue;
-    }
+  return previousComments
+    .map((previousComment) => {
+      if (!isRecord(previousComment) || typeof previousComment.body !== "string") {
+        return undefined;
+      }
 
-    const body = stripMarkdownBreaks(previousComment.body);
-    if (body) {
+      const body = stripMarkdownBreaks(previousComment.body);
+      if (!body) {
+        return undefined;
+      }
+
       return {
+        ...(typeof previousComment.id === "string" || typeof previousComment.id === "number"
+          ? { id: previousComment.id }
+          : {}),
         ...(typeof previousComment.author === "string" && previousComment.author.trim()
           ? { author: previousComment.author.trim() }
           : {}),
+        ...(typeof previousComment.createdAt === "string" && previousComment.createdAt.trim()
+          ? { createdAt: previousComment.createdAt.trim() }
+          : {}),
         body
       };
-    }
-  }
-
-  return undefined;
-}
-
-function previousCommentReference(
-  comment: PreviousCommentContext,
-  language: GitppouConfig["reportLanguage"]
-): string {
-  const speaker = previousCommentSpeakerPrefix(comment, language);
-  const body = shortContext(comment.body);
-
-  if (language === "ja") {
-    return `${speaker} / 本文: 「${body}」`;
-  }
-
-  return `${speaker} / body: "${body}"`;
+    })
+    .filter((comment): comment is PreviousCommentContext => Boolean(comment));
 }
 
 function previousCommentSpeakerPrefix(
@@ -386,10 +472,10 @@ function previousCommentSpeakerPrefix(
 ): string {
   const author = speakerName(comment.author);
   if (language === "ja") {
-    return `直前コメント（発言者: ${author ?? "不明"}）`;
+    return `関連コメント（発言者: ${author ?? "不明"}）`;
   }
 
-  return `the previous comment by ${author ?? "unknown"}`;
+  return `the related comment by ${author ?? "unknown"}`;
 }
 
 function speakerName(author: string | undefined): string | undefined {
@@ -443,6 +529,213 @@ function issueMetadataLine(group: ActivityGroup, language: GitppouConfig["report
   const line = parts.filter((part): part is string => Boolean(part)).join(" / ");
 
   return line || undefined;
+}
+
+function issueSummaryParagraph(group: ActivityGroup, language: GitppouConfig["reportLanguage"]): string | undefined {
+  const githubSummary = issueSourceSummary(group.activities, "github", group.issueKey, language);
+  const backlogSummary = issueSourceSummary(group.activities, "backlog", group.issueKey, language);
+
+  if (!githubSummary && !backlogSummary) {
+    return undefined;
+  }
+
+  if (language === "ja") {
+    const clauses = [githubSummary, backlogSummary].filter((value): value is string => Boolean(value));
+    const subject = group.issueKey === "Unlinked" ? "この項目" : "この課題";
+    return `${subject}では、${clauses.join("、")}を行いました。`;
+  }
+
+  const clauses = [githubSummary, backlogSummary].filter((value): value is string => Boolean(value));
+  const subject = group.issueKey === "Unlinked" ? "these unlinked activities" : "this issue";
+  return `For ${subject}, work included ${clauses.join(", plus ")}.`;
+}
+
+function issueSourceSummary(
+  activities: NormalizedActivity[],
+  source: NormalizedActivity["source"],
+  issueKey: string,
+  language: GitppouConfig["reportLanguage"]
+): string | undefined {
+  const sourceActivities = activities.filter((activity) => activity.source === source);
+  const terms = issueSummaryTerms(sourceActivities, language);
+  if (terms.length === 0) {
+    return undefined;
+  }
+
+  const topics = issueSummaryTopics(sourceActivities, issueKey, language);
+  const sourceLabel = source === "github" ? "GitHub" : "Backlog";
+
+  if (language === "ja") {
+    const topicPrefix = topics.length > 0 ? `${quoteTopics(topics, language)}を中心に` : "";
+    return `${sourceLabel}で${topicPrefix}${joinJapaneseTerms(terms)}`;
+  }
+
+  const topicSuffix = topics.length > 0 ? ` around ${quoteTopics(topics, language)}` : "";
+  return `${sourceLabel} ${joinEnglishTerms(terms)}${topicSuffix}`;
+}
+
+function issueSummaryTerms(
+  activities: NormalizedActivity[],
+  language: GitppouConfig["reportLanguage"]
+): string[] {
+  const kinds = new Set(activities.map((activity) => activity.kind));
+
+  if (language === "ja") {
+    return [
+      kinds.has("commit") ? "commit作成" : undefined,
+      kinds.has("pull_request") ? "PR更新" : undefined,
+      kinds.has("review") ? "PRレビュー" : undefined,
+      kinds.has("comment") ? "コメント対応" : undefined,
+      kinds.has("status_change") ? "ステータス変更" : undefined
+    ].filter((value): value is string => Boolean(value));
+  }
+
+  return [
+    kinds.has("commit") ? "commits" : undefined,
+    kinds.has("pull_request") ? "pull request updates" : undefined,
+    kinds.has("review") ? "pull request reviews" : undefined,
+    kinds.has("comment") ? "comments" : undefined,
+    kinds.has("status_change") ? "status changes" : undefined
+  ].filter((value): value is string => Boolean(value));
+}
+
+function issueSummaryTopics(
+  activities: NormalizedActivity[],
+  issueKey: string,
+  language: GitppouConfig["reportLanguage"]
+): string[] {
+  const unique = new Map<string, string>();
+
+  for (const activity of activities) {
+    const topic = activitySummaryTopic(activity, issueKey, language);
+    if (!topic) {
+      continue;
+    }
+
+    const key = topic.toLowerCase();
+    if (!unique.has(key)) {
+      unique.set(key, topic);
+    }
+  }
+
+  return [...unique.values()].slice(0, 2);
+}
+
+function activitySummaryTopic(
+  activity: NormalizedActivity,
+  issueKey: string,
+  language: GitppouConfig["reportLanguage"]
+): string | undefined {
+  switch (activity.kind) {
+    case "commit":
+    case "pull_request":
+    case "review":
+      return titleSummaryTopic(activity.title, issueKey);
+    case "comment": {
+      const isConfirmation = activity.body ? isConfirmationComment(activity.body) : false;
+      const previousComment = relatedPreviousComment(activity, isConfirmation);
+      if (previousComment) {
+        const previousTopic = textSummaryTopic(
+          confirmationRequestTarget(previousComment.body) ?? previousComment.body,
+          issueKey
+        );
+        if (previousTopic) {
+          return language === "ja" ? `${previousTopic}への返信` : `reply to ${previousTopic}`;
+        }
+      }
+
+      return textSummaryTopic(activity.body ?? activity.title, issueKey);
+    }
+    case "status_change":
+      return statusChangeSummaryTopic(activity, language);
+    default:
+      return undefined;
+  }
+}
+
+function titleSummaryTopic(title: string, issueKey: string): string | undefined {
+  const topic = textSummaryTopic(title, issueKey);
+  if (!topic || isLowValueTitleTopic(topic)) {
+    return undefined;
+  }
+
+  return topic;
+}
+
+function textSummaryTopic(value: string, issueKey: string): string | undefined {
+  const cleaned = stripLeadingIssueKey(stripConventionalCommitPrefix(cleanSummaryText(value)), issueKey);
+  return cleaned ? shortSummaryTopic(cleaned) : undefined;
+}
+
+function statusChangeSummaryTopic(
+  activity: NormalizedActivity,
+  language: GitppouConfig["reportLanguage"]
+): string | undefined {
+  const originalValue = metadataString(activity, "originalValue");
+  const newValue = metadataString(activity, "newValue");
+
+  if (originalValue && newValue) {
+    return language === "ja"
+      ? `ステータスを${originalValue}から${newValue}へ変更`
+      : `status change from "${originalValue}" to "${newValue}"`;
+  }
+
+  if (newValue) {
+    return language === "ja" ? `ステータスを${newValue}へ変更` : `status change to "${newValue}"`;
+  }
+
+  return undefined;
+}
+
+function cleanSummaryText(value: string): string {
+  return stripMarkdownBreaks(value)
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+    .replace(/https?:\/\/\S+/g, "")
+    .replace(/@[^\s　]+/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function stripConventionalCommitPrefix(value: string): string {
+  return value.replace(/^(?:feat|fix|docs|chore|refactor|test|style|perf|ci|build|revert)(?:\([^)]+\))?!?:\s*/i, "");
+}
+
+function shortSummaryTopic(value: string): string {
+  const compact = value.replace(/[。.!！]+$/u, "").trim();
+  return compact.length > 72 ? `${compact.slice(0, 72)}...` : compact;
+}
+
+function isLowValueTitleTopic(value: string): boolean {
+  return (
+    /^merge pull request #\d+/i.test(value) ||
+    /^merge branch/i.test(value) ||
+    /^(?:feature|fix|hotfix|release)[/\s:_-]+[a-z0-9_]+[\s_-]*\d+$/i.test(value)
+  );
+}
+
+function quoteTopics(values: string[], language: GitppouConfig["reportLanguage"]): string {
+  const quoted = values.map((value) => (language === "ja" ? `「${value}」` : `"${value}"`));
+  return language === "ja" ? joinJapaneseTerms(quoted) : joinEnglishTerms(quoted);
+}
+
+function joinJapaneseTerms(values: string[]): string {
+  if (values.length <= 1) {
+    return values[0] ?? "";
+  }
+
+  return `${values.slice(0, -1).join("、")}と${values[values.length - 1]}`;
+}
+
+function joinEnglishTerms(values: string[]): string {
+  if (values.length <= 1) {
+    return values[0] ?? "";
+  }
+
+  if (values.length === 2) {
+    return `${values[0]} and ${values[1]}`;
+  }
+
+  return `${values.slice(0, -1).join(", ")}, and ${values[values.length - 1]}`;
 }
 
 function progressLines(

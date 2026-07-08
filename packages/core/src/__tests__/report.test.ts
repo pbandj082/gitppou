@@ -103,6 +103,58 @@ describe("report helpers", () => {
     expect(markdown).not.toContain("### [APP-1 Updated issue](https://example.backlog.com/view/APP-1#comment-123)");
   });
 
+  it("renders an issue summary between metadata and activity bullets", () => {
+    const pullRequest: NormalizedActivity = {
+      source: "github",
+      kind: "pull_request",
+      issueKey: "APP-1",
+      title: "APP-1 Update login flow"
+    };
+    const comment: NormalizedActivity = {
+      source: "backlog",
+      kind: "comment",
+      issueKey: "APP-1",
+      title: "APP-1 Updated issue",
+      body: "確認しました。"
+    };
+    const statusChange: NormalizedActivity = {
+      source: "backlog",
+      kind: "status_change",
+      issueKey: "APP-1",
+      title: "APP-1 status changed: Updated issue",
+      metadata: {
+        issueType: "Task",
+        categories: ["Backend"],
+        originalValue: "確認依頼",
+        newValue: "処理済み"
+      }
+    };
+    const markdown = generateTemplateReport({
+      config: {
+        ...baseConfig,
+        reportLanguage: "ja"
+      },
+      activities: [pullRequest, comment, statusChange],
+      groups: [
+        {
+          issueKey: "APP-1",
+          title: "Updated issue",
+          activities: [pullRequest, comment, statusChange]
+        }
+      ]
+    });
+
+    expect(markdown).toContain(
+      [
+        "**種別:** Task / **カテゴリー:** Backend",
+        "",
+        "この課題では、GitHubで「Update login flow」を中心にPR更新、Backlogで「確認しました」と「ステータスを確認依頼から処理済みへ変更」を中心にコメント対応とステータス変更を行いました。",
+        "",
+        "- PRを更新: APP-1 Update login flow"
+      ].join("\n")
+    );
+  });
+
   it("describes Backlog status changes explicitly in Japanese", () => {
     const markdown = generateTemplateReport({
       config: {
@@ -193,7 +245,14 @@ describe("report helpers", () => {
       ]
     });
 
-    expect(markdown).toContain("- この課題について確認コメントを追加: @alice 確認しました！");
+    expect(markdown).toContain(
+      [
+        "- この課題について確認コメントを追加",
+        "",
+        "  > **投稿コメント**",
+        "  > @alice 確認しました！"
+      ].join("\n")
+    );
     expect(markdown).not.toContain("- APP-1: コメントを追加");
     expect(markdown).not.toContain("## 課題・相談事項");
   });
@@ -234,11 +293,45 @@ describe("report helpers", () => {
       ]
     });
 
+    expect(markdown).toContain("- 関連コメント（発言者: Reviewer）の確認依頼「ログイン後に二重遷移しないか」に対して確認コメントを追加");
     expect(markdown).toContain(
-      "- 直前コメント（発言者: Reviewer）の確認依頼「ログイン後に二重遷移しないか」に対して確認コメントを追加: 確認しました！"
+      [
+        "  > **関連コメント（発言者: Reviewer / 2026-07-06T09:00:00+09:00）**",
+        "  > @alice ログイン後に二重遷移しないか確認をお願いします。",
+        "",
+        "  > **投稿コメント**",
+        "  > 確認しました！"
+      ].join("\n")
     );
     expect(markdown).not.toContain("発言者: @Reviewer");
     expect(markdown).not.toContain("- この課題について確認コメントを追加");
+  });
+
+  it("renders URLs in comments as Markdown links", () => {
+    const activity: NormalizedActivity = {
+      source: "backlog",
+      kind: "comment",
+      issueKey: "APP-1",
+      title: "APP-1 Updated issue",
+      body: "PRを確認しました https://github.com/owner/repo/pull/1。"
+    };
+    const markdown = generateTemplateReport({
+      config: {
+        ...baseConfig,
+        reportLanguage: "ja"
+      },
+      activities: [activity],
+      groups: [
+        {
+          issueKey: "APP-1",
+          title: "Updated issue",
+          activities: [activity]
+        }
+      ]
+    });
+
+    expect(markdown).toContain("  > PRを確認しました [リンク](https://github.com/owner/repo/pull/1)。");
+    expect(markdown).not.toContain("https://github.com/owner/repo/pull/1。");
   });
 
   it("renders pull request diff stats", () => {
@@ -295,7 +388,14 @@ describe("report helpers", () => {
       ]
     });
 
-    expect(markdown).toContain("- APP-2: 「Child issue」についてコメントを追加: 関連する子課題を更新しました。");
+    expect(markdown).toContain(
+      [
+        "- APP-2: 「Child issue」についてコメントを追加",
+        "",
+        "  > **投稿コメント**",
+        "  > 関連する子課題を更新しました。"
+      ].join("\n")
+    );
   });
 
   it("does not render context-only Backlog issue updates as work", () => {
