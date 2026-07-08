@@ -32,6 +32,24 @@ describe("normalizeActivities", () => {
     expect(extractIssueKeys("APP-123 WEB-999", ["APP"])).toEqual(["APP-123"]);
   });
 
+  it("extracts issue keys from branch metadata", () => {
+    const normalized = normalizeActivities(
+      [
+        {
+          source: "github",
+          kind: "commit",
+          title: "refine report output",
+          metadata: {
+            branch: "feature/APP-123-login"
+          }
+        }
+      ],
+      ["APP"]
+    );
+
+    expect(normalized[0]?.issueKey).toBe("APP-123");
+  });
+
   it("removes existing issue keys outside the allowed project keys", () => {
     const normalized = normalizeActivities(
       [

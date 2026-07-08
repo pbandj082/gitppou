@@ -275,9 +275,18 @@ async function fetchCommits(
     per_page: 100
   });
 
-  return commits
-    .filter((commit) => isOnReportDate(commit.commit.author?.date, config.reportDate, config.reportTimezone))
-    .map((commit) => {
+  const reportDateCommits = commits.filter((commit) =>
+    isOnReportDate(commit.commit.author?.date, config.reportDate, config.reportTimezone)
+  );
+  const commitsWithContext = await Promise.all(
+    reportDateCommits.map(async (commit) => ({
+      commit,
+      pullRequestContext: await fetchCommitPullRequestContext(octokit, repo, commit.sha)
+    }))
+  );
+
+  return commitsWithContext
+    .map(({ commit, pullRequestContext }) => {
       const title = firstLine(commit.commit.message);
       return {
         source: "github",
@@ -289,10 +298,50 @@ async function fetchCommits(
         ...(commit.commit.author?.date ? { createdAt: commit.commit.author.date } : {}),
         metadata: {
           sha: commit.sha,
-          shortSha: commit.sha.slice(0, 7)
+          shortSha: commit.sha.slice(0, 7),
+          ...(pullRequestContext?.branch ? { branch: pullRequestContext.branch } : {}),
+          ...(pullRequestContext?.pullRequestNumber ? { pullRequestNumber: pullRequestContext.pullRequestNumber } : {}),
+          ...(pullRequestContext?.pullRequestTitle ? { pullRequestTitle: pullRequestContext.pullRequestTitle } : {}),
+          ...(pullRequestContext?.pullRequestUrl ? { pullRequestUrl: pullRequestContext.pullRequestUrl } : {})
         }
       } satisfies NormalizedActivity;
     });
+}
+
+async function fetchCommitPullRequestContext(
+  octokit: Octokit,
+  repo: RepoRef,
+  sha: string
+): Promise<
+  | {
+      branch?: string;
+      pullRequestNumber?: number;
+      pullRequestTitle?: string;
+      pullRequestUrl?: string;
+    }
+  | undefined
+> {
+  try {
+    const pullRequests = await octokit.paginate(octokit.repos.listPullRequestsAssociatedWithCommit, {
+      owner: repo.owner,
+      repo: repo.repo,
+      commit_sha: sha,
+      per_page: 100
+    });
+    const pullRequest = pullRequests.find((pull) => pull.head?.ref) ?? pullRequests[0];
+    if (!pullRequest) {
+      return undefined;
+    }
+
+    return {
+      ...(pullRequest.head?.ref ? { branch: pullRequest.head.ref } : {}),
+      pullRequestNumber: pullRequest.number,
+      pullRequestTitle: pullRequest.title,
+      pullRequestUrl: pullRequest.html_url
+    };
+  } catch {
+    return undefined;
+  }
 }
 
 async function fetchPullRequests(
@@ -332,7 +381,9 @@ async function fetchPullRequests(
         state: item.state,
         additions: stats.additions,
         deletions: stats.deletions,
-        changedFiles: stats.changedFiles
+        changedFiles: stats.changedFiles,
+        branch: stats.branch,
+        baseBranch: stats.baseBranch
       }
     };
 
@@ -358,7 +409,9 @@ async function fetchPullRequestStats(octokit: Octokit, repo: RepoRef, pullNumber
   return {
     additions: response.data.additions,
     deletions: response.data.deletions,
-    changedFiles: response.data.changed_files
+    changedFiles: response.data.changed_files,
+    branch: response.data.head.ref,
+    baseBranch: response.data.base.ref
   };
 }
 

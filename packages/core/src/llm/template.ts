@@ -64,7 +64,7 @@ export function generateTemplateReport({ config, activities, groups }: TemplateR
   } else {
     for (const group of reportGroups) {
       const descriptionContext = descriptionContextForGroup(group);
-      lines.push(`### ${formatGroupHeading(group)}`, "");
+      lines.push(`### ${formatLinkedGroupHeading(group, activities)}`, "");
       const metadataLine = issueMetadataLine(group, config.reportLanguage);
       if (metadataLine) {
         lines.push(metadataLine, "");
@@ -120,6 +120,55 @@ function formatGroupHeading(group: ActivityGroup): string {
   }
 
   return group.title ? `${group.issueKey} ${group.title}` : group.issueKey;
+}
+
+function formatLinkedGroupHeading(group: ActivityGroup, activities: NormalizedActivity[]): string {
+  const heading = formatGroupHeading(group);
+  const url = backlogIssueUrlForGroup(group, activities);
+
+  return url ? `[${markdownLinkText(heading)}](${markdownLinkUrl(url)})` : heading;
+}
+
+function backlogIssueUrlForGroup(group: ActivityGroup, activities: NormalizedActivity[]): string | undefined {
+  if (group.issueKey === "Unlinked") {
+    return undefined;
+  }
+
+  for (const activity of [...group.activities, ...activities]) {
+    if (activity.source !== "backlog" || activity.issueKey !== group.issueKey || !activity.url) {
+      continue;
+    }
+
+    const issueUrl = backlogIssueUrl(activity.url, group.issueKey);
+    if (issueUrl) {
+      return issueUrl;
+    }
+  }
+
+  return undefined;
+}
+
+function backlogIssueUrl(url: string, issueKey: string): string | undefined {
+  try {
+    const parsed = new URL(url);
+    if (!parsed.hostname.includes("backlog.") || !parsed.pathname.includes(`/view/${issueKey}`)) {
+      return undefined;
+    }
+
+    parsed.hash = "";
+    parsed.search = "";
+    return parsed.toString();
+  } catch {
+    return url.includes(`/view/${issueKey}`) ? url.split("#")[0]?.split("?")[0] : undefined;
+  }
+}
+
+function markdownLinkText(value: string): string {
+  return value.replace(/([\\[\]])/g, "\\$1");
+}
+
+function markdownLinkUrl(value: string): string {
+  return value.replace(/\)/g, "%29");
 }
 
 function descriptionContextForGroup(group: ActivityGroup): ActivityDescriptionContext {

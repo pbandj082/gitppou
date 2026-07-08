@@ -41599,9 +41599,13 @@ async function fetchCommits(octokit, repo, config) {
         until: until.toISOString(),
         per_page: 100
     });
-    return commits
-        .filter((commit) => isOnReportDate(commit.commit.author?.date, config.reportDate, config.reportTimezone))
-        .map((commit) => {
+    const reportDateCommits = commits.filter((commit) => isOnReportDate(commit.commit.author?.date, config.reportDate, config.reportTimezone));
+    const commitsWithContext = await Promise.all(reportDateCommits.map(async (commit) => ({
+        commit,
+        pullRequestContext: await fetchCommitPullRequestContext(octokit, repo, commit.sha)
+    })));
+    return commitsWithContext
+        .map(({ commit, pullRequestContext }) => {
         const title = firstLine(commit.commit.message);
         return {
             source: "github",
@@ -41613,10 +41617,37 @@ async function fetchCommits(octokit, repo, config) {
             ...(commit.commit.author?.date ? { createdAt: commit.commit.author.date } : {}),
             metadata: {
                 sha: commit.sha,
-                shortSha: commit.sha.slice(0, 7)
+                shortSha: commit.sha.slice(0, 7),
+                ...(pullRequestContext?.branch ? { branch: pullRequestContext.branch } : {}),
+                ...(pullRequestContext?.pullRequestNumber ? { pullRequestNumber: pullRequestContext.pullRequestNumber } : {}),
+                ...(pullRequestContext?.pullRequestTitle ? { pullRequestTitle: pullRequestContext.pullRequestTitle } : {}),
+                ...(pullRequestContext?.pullRequestUrl ? { pullRequestUrl: pullRequestContext.pullRequestUrl } : {})
             }
         };
     });
+}
+async function fetchCommitPullRequestContext(octokit, repo, sha) {
+    try {
+        const pullRequests = await octokit.paginate(octokit.repos.listPullRequestsAssociatedWithCommit, {
+            owner: repo.owner,
+            repo: repo.repo,
+            commit_sha: sha,
+            per_page: 100
+        });
+        const pullRequest = pullRequests.find((pull) => pull.head?.ref) ?? pullRequests[0];
+        if (!pullRequest) {
+            return undefined;
+        }
+        return {
+            ...(pullRequest.head?.ref ? { branch: pullRequest.head.ref } : {}),
+            pullRequestNumber: pullRequest.number,
+            pullRequestTitle: pullRequest.title,
+            pullRequestUrl: pullRequest.html_url
+        };
+    }
+    catch {
+        return undefined;
+    }
 }
 async function fetchPullRequests(octokit, repo, config) {
     const createdQuery = `repo:${repo.fullName} is:pr author:${config.githubUsername} created:${config.reportDate}`;
@@ -41647,7 +41678,9 @@ async function fetchPullRequests(octokit, repo, config) {
                 state: item.state,
                 additions: stats.additions,
                 deletions: stats.deletions,
-                changedFiles: stats.changedFiles
+                changedFiles: stats.changedFiles,
+                branch: stats.branch,
+                baseBranch: stats.baseBranch
             }
         };
         if (item.body) {
@@ -41668,7 +41701,9 @@ async function fetchPullRequestStats(octokit, repo, pullNumber) {
     return {
         additions: response.data.additions,
         deletions: response.data.deletions,
-        changedFiles: response.data.changed_files
+        changedFiles: response.data.changed_files,
+        branch: response.data.head.ref,
+        baseBranch: response.data.base.ref
     };
 }
 async function github_fetchIssueComments(octokit, repo, config) {
@@ -41892,7 +41927,7 @@ function generateTemplateReport({ config, activities, groups }) {
     else {
         for (const group of reportGroups) {
             const descriptionContext = descriptionContextForGroup(group);
-            lines.push(`### ${formatGroupHeading(group)}`, "");
+            lines.push(`### ${formatLinkedGroupHeading(group, activities)}`, "");
             const metadataLine = issueMetadataLine(group, config.reportLanguage);
             if (metadataLine) {
                 lines.push(metadataLine, "");
@@ -41942,6 +41977,46 @@ function formatGroupHeading(group) {
         return "Unlinked";
     }
     return group.title ? `${group.issueKey} ${group.title}` : group.issueKey;
+}
+function formatLinkedGroupHeading(group, activities) {
+    const heading = formatGroupHeading(group);
+    const url = backlogIssueUrlForGroup(group, activities);
+    return url ? `[${markdownLinkText(heading)}](${markdownLinkUrl(url)})` : heading;
+}
+function backlogIssueUrlForGroup(group, activities) {
+    if (group.issueKey === "Unlinked") {
+        return undefined;
+    }
+    for (const activity of [...group.activities, ...activities]) {
+        if (activity.source !== "backlog" || activity.issueKey !== group.issueKey || !activity.url) {
+            continue;
+        }
+        const issueUrl = backlogIssueUrl(activity.url, group.issueKey);
+        if (issueUrl) {
+            return issueUrl;
+        }
+    }
+    return undefined;
+}
+function backlogIssueUrl(url, issueKey) {
+    try {
+        const parsed = new URL(url);
+        if (!parsed.hostname.includes("backlog.") || !parsed.pathname.includes(`/view/${issueKey}`)) {
+            return undefined;
+        }
+        parsed.hash = "";
+        parsed.search = "";
+        return parsed.toString();
+    }
+    catch {
+        return url.includes(`/view/${issueKey}`) ? url.split("#")[0]?.split("?")[0] : undefined;
+    }
+}
+function markdownLinkText(value) {
+    return value.replace(/([\\[\]])/g, "\\$1");
+}
+function markdownLinkUrl(value) {
+    return value.replace(/\)/g, "%29");
 }
 function descriptionContextForGroup(group) {
     return {
@@ -42540,6 +42615,7 @@ function buildPrompt(input) {
 - 不明な点は「確認が必要」と書く
 - Backlog課題キーを優先して整理する
 - GitHubのcommit/PRとBacklog課題が同じ課題キーを含む場合は同じ項目にまとめる
+- テンプレート日報のBacklog課題見出しにリンクが含まれる場合は、その見出しリンクを維持する
 - 「userActions」にある当日ユーザー本人の行動だけを「本日対応したこと」に書く
 - 「contextOnly」は直近の流れや課題の背景を説明するためだけに使い、ユーザー本人の作業として書かない
 - Backlogの「comment_context」は、ユーザーコメントが何への返信・確認なのかを判断するために使う
@@ -42577,6 +42653,7 @@ Rules:
 - If something is unclear, write "Needs confirmation".
 - Group work by Backlog issue key when possible.
 - If GitHub commits/PRs and Backlog issues share the same issue key, merge them into the same section.
+- If template Backlog issue headings contain links, preserve those heading links.
 - Write "Work completed today" only from entries in "userActions".
 - Use "contextOnly" only to explain recent flow or issue background. Do not present it as work done by the user.
 - Use Backlog "comment_context" entries to infer what a user comment confirms or replies to.
@@ -42861,7 +42938,7 @@ function localReportSummary(reportMarkdown, language) {
 function sectionHeadings(reportMarkdown, sectionTitle) {
     return sectionLines(reportMarkdown, sectionTitle)
         .filter((line) => /^###\s+/.test(line))
-        .map((line) => line.replace(/^###\s+/, "").trim())
+        .map((line) => stripMarkdownLinks(line.replace(/^###\s+/, "").trim()))
         .filter(Boolean);
 }
 function nextActionItems(reportMarkdown, language) {
@@ -42880,6 +42957,9 @@ function sectionLines(reportMarkdown, sectionTitle) {
     const rest = lines.slice(start + 1);
     const end = rest.findIndex((line) => /^##\s+/.test(line));
     return end < 0 ? rest : rest.slice(0, end);
+}
+function stripMarkdownLinks(value) {
+    return value.replace(/\[([^\]]+)\]\([^)]+\)/g, "$1");
 }
 function joinJapanese(items) {
     if (items.length <= 1) {

@@ -63,4 +63,28 @@ describe("generateSlackSummary", () => {
     expect(summary).not.toContain("actions/runs/123456789");
     expect(summary).not.toContain("課題・相談:");
   });
+
+  it("uses plain heading text when local summaries read linked headings", () => {
+    const summary = generateSlackSummary(
+      baseConfig,
+      ".gitppou/reports/2026-07/2026-07-06.md",
+      [
+        "# 日報 - 2026-07-06",
+        "",
+        "## 本日対応したこと",
+        "",
+        "### [APP-1 Login flow](https://example.backlog.com/view/APP-1)",
+        "",
+        "- PRを更新: APP-1 Login flow",
+        "",
+        "## 明日やること",
+        "",
+        "- APP-1 Login flow: ステータス: 処理中"
+      ].join("\n")
+    );
+
+    expect(summary).toContain("本日はAPP-1 Login flowを中心に対応しました。");
+    expect(summary).not.toContain("[APP-1 Login flow]");
+    expect(summary).not.toContain("https://example.backlog.com/view/APP-1");
+  });
 });

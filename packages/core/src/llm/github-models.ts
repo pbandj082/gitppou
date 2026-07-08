@@ -136,6 +136,7 @@ function buildPrompt(input: {
 - 不明な点は「確認が必要」と書く
 - Backlog課題キーを優先して整理する
 - GitHubのcommit/PRとBacklog課題が同じ課題キーを含む場合は同じ項目にまとめる
+- テンプレート日報のBacklog課題見出しにリンクが含まれる場合は、その見出しリンクを維持する
 - 「userActions」にある当日ユーザー本人の行動だけを「本日対応したこと」に書く
 - 「contextOnly」は直近の流れや課題の背景を説明するためだけに使い、ユーザー本人の作業として書かない
 - Backlogの「comment_context」は、ユーザーコメントが何への返信・確認なのかを判断するために使う
@@ -174,6 +175,7 @@ Rules:
 - If something is unclear, write "Needs confirmation".
 - Group work by Backlog issue key when possible.
 - If GitHub commits/PRs and Backlog issues share the same issue key, merge them into the same section.
+- If template Backlog issue headings contain links, preserve those heading links.
 - Write "Work completed today" only from entries in "userActions".
 - Use "contextOnly" only to explain recent flow or issue background. Do not present it as work done by the user.
 - Use Backlog "comment_context" entries to infer what a user comment confirms or replies to.

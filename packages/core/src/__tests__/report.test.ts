@@ -69,6 +69,40 @@ describe("report helpers", () => {
     }
   });
 
+  it("links Backlog issue headings to the Backlog issue URL", () => {
+    const githubActivity: NormalizedActivity = {
+      source: "github",
+      kind: "commit",
+      issueKey: "APP-1",
+      title: "refine report output",
+      repository: "owner/repo"
+    };
+    const backlogContext: NormalizedActivity = {
+      source: "backlog",
+      kind: "assigned_issue",
+      issueKey: "APP-1",
+      title: "APP-1 Updated issue",
+      url: "https://example.backlog.com/view/APP-1#comment-123"
+    };
+    const markdown = generateTemplateReport({
+      config: {
+        ...baseConfig,
+        reportLanguage: "ja"
+      },
+      activities: [githubActivity, backlogContext],
+      groups: [
+        {
+          issueKey: "APP-1",
+          title: "Updated issue",
+          activities: [githubActivity]
+        }
+      ]
+    });
+
+    expect(markdown).toContain("### [APP-1 Updated issue](https://example.backlog.com/view/APP-1)");
+    expect(markdown).not.toContain("### [APP-1 Updated issue](https://example.backlog.com/view/APP-1#comment-123)");
+  });
+
   it("describes Backlog status changes explicitly in Japanese", () => {
     const markdown = generateTemplateReport({
       config: {
