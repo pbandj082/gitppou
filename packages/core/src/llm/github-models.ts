@@ -31,6 +31,7 @@ export async function refineWithGitHubModels({
   activities,
   groups
 }: RefineInput): Promise<string> {
+  const inputBudgets = splitPromptInputBudget(config.llmMaxInputChars);
   const reportEvidence = buildReportEvidence(activities);
   const evidenceJson = JSON.stringify(
     {
@@ -49,8 +50,8 @@ export async function refineWithGitHubModels({
   const prompt = buildPrompt({
     date: config.reportDate,
     language: config.reportLanguage,
-    templateDraft,
-    evidenceJson: truncate(evidenceJson, config.llmMaxInputChars)
+    templateDraft: truncate(templateDraft, inputBudgets.templateDraft),
+    evidenceJson: truncate(evidenceJson, inputBudgets.evidenceJson)
   });
 
   return chatWithGitHubModels({
@@ -297,4 +298,14 @@ function truncate(value: string, maxChars: number): string {
   }
 
   return `${value.slice(0, maxChars)}\n...truncated to ${maxChars} characters`;
+}
+
+function splitPromptInputBudget(maxInputChars: number): { templateDraft: number; evidenceJson: number } {
+  const totalBudget = Math.max(2, Math.min(maxInputChars, 20_000));
+  const templateDraft = Math.max(1, Math.floor(totalBudget * 0.55));
+
+  return {
+    templateDraft,
+    evidenceJson: Math.max(1, totalBudget - templateDraft)
+  };
 }

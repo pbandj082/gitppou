@@ -78,6 +78,45 @@ describe("refineWithGitHubModels", () => {
       max_tokens: 4000
     });
   });
+
+  it("truncates both template and evidence input before requesting GitHub Models", async () => {
+    const fetchMock = vi.fn(async (_input: string | URL | Request, _init?: RequestInit) =>
+      jsonResponse({
+        choices: [
+          {
+            finish_reason: "stop",
+            message: {
+              content: "# 日報\n\n- complete"
+            }
+          }
+        ]
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await refineWithGitHubModels({
+      config: {
+        ...baseConfig,
+        llmMaxInputChars: 100
+      },
+      templateDraft: `# 日報\n\n${"T".repeat(200)}`,
+      activities: [
+        {
+          source: "github",
+          kind: "commit",
+          title: `APP-1 ${"E".repeat(200)}`
+        }
+      ],
+      groups: []
+    });
+
+    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    const prompt = body.messages[0].content;
+    expect(prompt).toContain("truncated to 55 characters");
+    expect(prompt).toContain("truncated to 45 characters");
+    expect(prompt).not.toContain("T".repeat(120));
+    expect(prompt).not.toContain("E".repeat(120));
+  });
 });
 
 function jsonResponse(body: unknown, status = 200): Response {
