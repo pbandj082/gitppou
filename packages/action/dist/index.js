@@ -41412,8 +41412,13 @@ async function fetchGitHubActivities(config) {
     }
     const octokitsByOwner = new Map();
     const repos = await resolveRepoSpecs(config, octokitsByOwner);
-    const activities = await Promise.all(repos.map((repo) => fetchRepoActivities(octokitForOwner(octokitsByOwner, config, repo.owner), repo, config)));
-    return activities.flat();
+    const searchGroups = await buildRepoSearchGroups(config, octokitsByOwner, repos);
+    const [repoActivities, pullRequests, reviews] = await Promise.all([
+        Promise.all(repos.map((repo) => fetchRepoActivities(octokitForOwner(octokitsByOwner, config, repo.owner), repo, config))),
+        fetchPullRequestsForSearchGroups(searchGroups, config),
+        fetchPullRequestReviewsForSearchGroups(searchGroups, config)
+    ]);
+    return [...repoActivities.flat(), ...pullRequests, ...reviews];
 }
 function parseGitHubRepoSpecString(value) {
     const trimmed = value.trim();
@@ -41581,13 +41586,11 @@ function parseRepoSelectorSort(value) {
     throw new Error(`Unsupported repository selector sort "${value}". Supported values are created, updated, pushed, and full_name.`);
 }
 async function fetchRepoActivities(octokit, repo, config) {
-    const [commits, pullRequests, comments, reviews] = await Promise.all([
+    const [commits, comments] = await Promise.all([
         fetchCommits(octokit, repo, config),
-        fetchPullRequests(octokit, repo, config),
-        github_fetchIssueComments(octokit, repo, config),
-        fetchPullRequestReviews(octokit, repo, config)
+        github_fetchIssueComments(octokit, repo, config)
     ]);
-    return [...commits, ...pullRequests, ...comments, ...reviews];
+    return [...commits, ...comments];
 }
 async function fetchCommits(octokit, repo, config) {
     const { since, until } = getReportDateRange(config.reportDate, config.reportTimezone);
@@ -41649,48 +41652,103 @@ async function fetchCommitPullRequestContext(octokit, repo, sha) {
         return undefined;
     }
 }
-async function fetchPullRequests(octokit, repo, config) {
-    const createdQuery = `repo:${repo.fullName} is:pr author:${config.githubUsername} created:${config.reportDate}`;
-    const updatedQuery = `repo:${repo.fullName} is:pr involves:${config.githubUsername} updated:${config.reportDate}`;
-    const mergedQuery = `repo:${repo.fullName} is:pr is:merged merged:${config.reportDate}`;
-    const [created, updated, merged] = await Promise.all([
-        searchIssues(octokit, createdQuery),
-        searchIssues(octokit, updatedQuery),
-        searchIssues(octokit, mergedQuery)
-    ]);
-    const mergedByUser = await filterMergedByUser(octokit, repo, merged, config.githubUsername);
-    const items = mergeSearchItems([...created, ...updated, ...mergedByUser]);
-    const itemsWithStats = await Promise.all(items.map(async (item) => ({
-        item,
-        stats: await fetchPullRequestStats(octokit, repo, item.number)
-    })));
-    return itemsWithStats.map(({ item, stats }) => {
-        const activity = {
-            source: "github",
-            kind: "pull_request",
-            title: item.title,
-            repository: repo.fullName,
-            createdAt: item.created_at,
-            updatedAt: item.updated_at,
-            url: item.html_url,
-            metadata: {
-                number: item.number,
-                state: item.state,
-                additions: stats.additions,
-                deletions: stats.deletions,
-                changedFiles: stats.changedFiles,
-                branch: stats.branch,
-                baseBranch: stats.baseBranch
-            }
+async function buildRepoSearchGroups(config, octokitsByOwner, repos) {
+    const reposByOwner = new Map();
+    for (const repo of repos) {
+        const normalizedOwner = repo.owner.toLowerCase();
+        const existing = reposByOwner.get(normalizedOwner);
+        if (existing) {
+            existing.push(repo);
+        }
+        else {
+            reposByOwner.set(normalizedOwner, [repo]);
+        }
+    }
+    return Promise.all([...reposByOwner.entries()].map(async ([normalizedOwner, ownerRepos]) => {
+        const owner = ownerRepos[0]?.owner ?? normalizedOwner;
+        const octokit = octokitForOwner(octokitsByOwner, config, owner);
+        const qualifier = owner.toLowerCase() === config.githubUsername.toLowerCase()
+            ? `user:${owner}`
+            : await resolveOwnerSearchQualifier(octokit, owner);
+        return {
+            qualifier,
+            octokit,
+            repoNames: new Set(ownerRepos.map((repo) => repo.fullName.toLowerCase()))
         };
-        if (item.body) {
-            activity.body = item.body;
+    }));
+}
+async function resolveOwnerSearchQualifier(octokit, owner) {
+    try {
+        await octokit.orgs.get({ org: owner });
+        return `org:${owner}`;
+    }
+    catch (error) {
+        if (!isNotFoundError(error)) {
+            throw error;
         }
-        if (item.user?.login) {
-            activity.author = item.user.login;
-        }
-        return activity;
-    });
+    }
+    return `user:${owner}`;
+}
+async function fetchPullRequestsForSearchGroups(groups, config) {
+    const groupActivities = await Promise.all(groups.map(async (group) => {
+        const createdQuery = `${group.qualifier} is:pr author:${config.githubUsername} created:${config.reportDate}`;
+        const updatedQuery = `${group.qualifier} is:pr involves:${config.githubUsername} updated:${config.reportDate}`;
+        const mergedQuery = `${group.qualifier} is:pr is:merged merged:${config.reportDate}`;
+        const [created, updated, merged] = await Promise.all([
+            searchIssues(group.octokit, createdQuery),
+            searchIssues(group.octokit, updatedQuery),
+            searchIssues(group.octokit, mergedQuery)
+        ]);
+        const mergedByUser = await filterMergedByUser(group.octokit, merged, config.githubUsername, group.repoNames);
+        const items = mergeSearchItems([
+            ...filterSearchItemsForRepos(created, group.repoNames),
+            ...filterSearchItemsForRepos(updated, group.repoNames),
+            ...mergedByUser
+        ]);
+        const itemsWithStats = await Promise.all(items.map(async (item) => {
+            const repo = searchItemRepo(item);
+            if (!repo || !group.repoNames.has(repo.fullName.toLowerCase())) {
+                return undefined;
+            }
+            const stats = await fetchPullRequestStats(group.octokit, repo, item.number);
+            return {
+                item,
+                repo,
+                stats,
+                commits: await fetchPullRequestCommitActivities(group.octokit, repo, item, stats.branch, config)
+            };
+        }));
+        return itemsWithStats
+            .filter((entry) => Boolean(entry))
+            .flatMap(({ item, repo, stats, commits }) => {
+            const activity = {
+                source: "github",
+                kind: "pull_request",
+                title: item.title,
+                repository: repo.fullName,
+                createdAt: item.created_at,
+                updatedAt: item.updated_at,
+                url: item.html_url,
+                metadata: {
+                    number: item.number,
+                    state: item.state,
+                    additions: stats.additions,
+                    deletions: stats.deletions,
+                    changedFiles: stats.changedFiles,
+                    branch: stats.branch,
+                    baseBranch: stats.baseBranch
+                }
+            };
+            if (item.body) {
+                activity.body = item.body;
+            }
+            if (item.user?.login) {
+                activity.author = item.user.login;
+            }
+            return [activity, ...commits];
+        });
+    }));
+    return groupActivities.flat();
 }
 async function fetchPullRequestStats(octokit, repo, pullNumber) {
     const response = await octokit.pulls.get({
@@ -41705,6 +41763,37 @@ async function fetchPullRequestStats(octokit, repo, pullNumber) {
         branch: response.data.head.ref,
         baseBranch: response.data.base.ref
     };
+}
+async function fetchPullRequestCommitActivities(octokit, repo, item, branch, config) {
+    const commits = await octokit.paginate(octokit.pulls.listCommits, {
+        owner: repo.owner,
+        repo: repo.repo,
+        pull_number: item.number,
+        per_page: 100
+    });
+    return commits
+        .filter((commit) => commit.author?.login === config.githubUsername)
+        .filter((commit) => isOnReportDate(commit.commit.author?.date, config.reportDate, config.reportTimezone))
+        .map((commit) => {
+        const title = firstLine(commit.commit.message);
+        return {
+            source: "github",
+            kind: "commit",
+            title,
+            repository: repo.fullName,
+            author: config.githubUsername,
+            url: commit.html_url,
+            ...(commit.commit.author?.date ? { createdAt: commit.commit.author.date } : {}),
+            metadata: {
+                sha: commit.sha,
+                shortSha: commit.sha.slice(0, 7),
+                branch,
+                pullRequestNumber: item.number,
+                pullRequestTitle: item.title,
+                pullRequestUrl: item.html_url
+            }
+        };
+    });
 }
 async function github_fetchIssueComments(octokit, repo, config) {
     const { since } = getReportDateRange(config.reportDate, config.reportTimezone);
@@ -41740,44 +41829,100 @@ async function github_fetchIssueComments(octokit, repo, config) {
         return activity;
     });
 }
-async function fetchPullRequestReviews(octokit, repo, config) {
-    const reviewedQuery = `repo:${repo.fullName} is:pr reviewed-by:${config.githubUsername} updated:${config.reportDate}`;
-    const reviewedPulls = mergeSearchItems(await searchIssues(octokit, reviewedQuery));
-    const reviewLists = await Promise.all(reviewedPulls.map(async (item) => ({
-        item,
-        reviews: await octokit.paginate(octokit.pulls.listReviews, {
-            owner: repo.owner,
-            repo: repo.repo,
-            pull_number: item.number,
-            per_page: 100
-        })
-    })));
-    return reviewLists.flatMap(({ item, reviews }) => reviews
-        .filter((review) => review.user?.login === config.githubUsername)
-        .filter((review) => isOnReportDate(review.submitted_at ?? undefined, config.reportDate, config.reportTimezone))
-        .map((review) => {
-        const activity = {
-            source: "github",
-            kind: "review",
-            title: `Review: ${item.title}`,
-            repository: repo.fullName,
-            url: review.html_url,
-            metadata: {
-                number: item.number,
-                state: review.state
+async function fetchPullRequestReviewsForSearchGroups(groups, config) {
+    const groupActivities = await Promise.all(groups.map(async (group) => {
+        const reviewedQuery = `${group.qualifier} is:pr reviewed-by:${config.githubUsername} updated:${config.reportDate}`;
+        const reviewedPulls = mergeSearchItems(filterSearchItemsForRepos(await searchIssues(group.octokit, reviewedQuery), group.repoNames));
+        const reviewLists = await Promise.all(reviewedPulls.map(async (item) => {
+            const repo = searchItemRepo(item);
+            if (!repo || !group.repoNames.has(repo.fullName.toLowerCase())) {
+                return undefined;
             }
-        };
-        if (review.body) {
-            activity.body = review.body;
-        }
-        if (review.user?.login) {
-            activity.author = review.user.login;
-        }
-        if (review.submitted_at) {
-            activity.createdAt = review.submitted_at;
-        }
-        return activity;
+            return {
+                item,
+                repo,
+                reviews: await group.octokit.paginate(group.octokit.pulls.listReviews, {
+                    owner: repo.owner,
+                    repo: repo.repo,
+                    pull_number: item.number,
+                    per_page: 100
+                })
+            };
+        }));
+        return reviewLists
+            .filter((entry) => Boolean(entry))
+            .flatMap(({ item, repo, reviews }) => reviews
+            .filter((review) => review.user?.login === config.githubUsername)
+            .filter((review) => isOnReportDate(review.submitted_at ?? undefined, config.reportDate, config.reportTimezone))
+            .map((review) => {
+            const activity = {
+                source: "github",
+                kind: "review",
+                title: `Review: ${item.title}`,
+                repository: repo.fullName,
+                url: review.html_url,
+                metadata: {
+                    number: item.number,
+                    state: review.state
+                }
+            };
+            if (review.body) {
+                activity.body = review.body;
+            }
+            if (review.user?.login) {
+                activity.author = review.user.login;
+            }
+            if (review.submitted_at) {
+                activity.createdAt = review.submitted_at;
+            }
+            return activity;
+        }));
     }));
+    return groupActivities.flat();
+}
+function filterSearchItemsForRepos(items, repoNames) {
+    return items.filter((item) => {
+        const repo = searchItemRepo(item);
+        return Boolean(repo && repoNames.has(repo.fullName.toLowerCase()));
+    });
+}
+function searchItemRepo(item) {
+    const fromRepositoryUrl = repoFullNameFromApiUrl(item.repository_url);
+    if (fromRepositoryUrl) {
+        return parseRepo(fromRepositoryUrl);
+    }
+    const fromHtmlUrl = repoFullNameFromHtmlUrl(item.html_url);
+    return fromHtmlUrl ? parseRepo(fromHtmlUrl) : undefined;
+}
+function repoFullNameFromApiUrl(value) {
+    if (!value) {
+        return undefined;
+    }
+    try {
+        const url = new URL(value);
+        const parts = url.pathname.split("/").filter(Boolean);
+        const repoIndex = parts.indexOf("repos");
+        const owner = repoIndex >= 0 ? parts[repoIndex + 1] : undefined;
+        const repo = repoIndex >= 0 ? parts[repoIndex + 2] : undefined;
+        return owner && repo ? `${owner}/${repo}` : undefined;
+    }
+    catch {
+        return undefined;
+    }
+}
+function repoFullNameFromHtmlUrl(value) {
+    if (!value) {
+        return undefined;
+    }
+    try {
+        const url = new URL(value);
+        const parts = url.pathname.split("/").filter(Boolean);
+        const [owner, repo] = parts;
+        return owner && repo ? `${owner}/${repo}` : undefined;
+    }
+    catch {
+        return undefined;
+    }
 }
 async function searchIssues(octokit, q) {
     return octokit.paginate(octokit.search.issuesAndPullRequests, {
@@ -41785,8 +41930,12 @@ async function searchIssues(octokit, q) {
         per_page: 100
     });
 }
-async function filterMergedByUser(octokit, repo, items, githubUsername) {
-    const checks = await Promise.all(mergeSearchItems(items).map(async (item) => {
+async function filterMergedByUser(octokit, items, githubUsername, repoNames) {
+    const checks = await Promise.all(mergeSearchItems(filterSearchItemsForRepos(items, repoNames)).map(async (item) => {
+        const repo = searchItemRepo(item);
+        if (!repo || !repoNames.has(repo.fullName.toLowerCase())) {
+            return undefined;
+        }
         const pull = await octokit.pulls.get({
             owner: repo.owner,
             repo: repo.repo,
@@ -42799,6 +42948,7 @@ function stripMarkdownBreaks(value) {
 const GITHUB_MODELS_ENDPOINT = "https://models.github.ai/inference/chat/completions";
 const GITHUB_API_VERSION = "2026-03-10";
 async function refineWithGitHubModels({ config, templateDraft, activities, groups }) {
+    const inputBudgets = splitPromptInputBudget(config.llmMaxInputChars);
     const reportEvidence = buildReportEvidence(activities);
     const evidenceJson = JSON.stringify({
         userActions: reportEvidence.userActions,
@@ -42813,8 +42963,8 @@ async function refineWithGitHubModels({ config, templateDraft, activities, group
     const prompt = buildPrompt({
         date: config.reportDate,
         language: config.reportLanguage,
-        templateDraft,
-        evidenceJson: truncate(evidenceJson, config.llmMaxInputChars)
+        templateDraft: truncate(templateDraft, inputBudgets.templateDraft),
+        evidenceJson: truncate(evidenceJson, inputBudgets.evidenceJson)
     });
     return chatWithGitHubModels({
         config,
@@ -43019,6 +43169,14 @@ function truncate(value, maxChars) {
         return value;
     }
     return `${value.slice(0, maxChars)}\n...truncated to ${maxChars} characters`;
+}
+function splitPromptInputBudget(maxInputChars) {
+    const totalBudget = Math.max(2, Math.min(maxInputChars, 20_000));
+    const templateDraft = Math.max(1, Math.floor(totalBudget * 0.55));
+    return {
+        templateDraft,
+        evidenceJson: Math.max(1, totalBudget - templateDraft)
+    };
 }
 
 ;// CONCATENATED MODULE: ../core/dist/llm/index.js
