@@ -92,7 +92,7 @@ function localReportSummary(
 function sectionHeadings(reportMarkdown: string, sectionTitle: string): string[] {
   return sectionLines(reportMarkdown, sectionTitle)
     .filter((line) => /^###\s+/.test(line))
-    .map((line) => line.replace(/^###\s+/, "").trim())
+    .map((line) => stripMarkdownLinks(line.replace(/^###\s+/, "").trim()))
     .filter(Boolean);
 }
 
@@ -114,6 +114,10 @@ function sectionLines(reportMarkdown: string, sectionTitle: string): string[] {
   const rest = lines.slice(start + 1);
   const end = rest.findIndex((line) => /^##\s+/.test(line));
   return end < 0 ? rest : rest.slice(0, end);
+}
+
+function stripMarkdownLinks(value: string): string {
+  return value.replace(/\[([^\]]+)\]\([^)]+\)/g, "$1");
 }
 
 function joinJapanese(items: string[]): string {

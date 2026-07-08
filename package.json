@@ -9,11 +9,15 @@
     "test": "pnpm -r --sort test",
     "lint": "biome lint .",
     "format": "prettier --write .",
+    "changeset": "changeset",
+    "version:packages": "changeset version",
+    "release:tag": "node scripts/create-release-tag.mjs",
     "build:action": "pnpm --filter @gitppou/core build && pnpm --filter @gitppou/action build",
     "preview": "pnpm --filter @gitppou/cli build && node packages/cli/dist/index.js preview"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.2",
+    "@changesets/cli": "^2.31.0",
     "@types/node": "^22.0.0",
     "prettier": "^3.0.0",
     "typescript": "^5.0.0",

@@ -386,6 +386,22 @@ pnpm test
 pnpm build
 ```
 
+## Releases
+
+This repository uses Changesets for semantic versions. npm publishing is intentionally not configured.
+
+Add a changeset for changes that should produce a new action tag:
+
+```bash
+pnpm changeset
+```
+
+When changesets are merged to `main`, the Release workflow opens a version PR. Merging that version PR updates package versions and changelogs, then creates a repository tag like `v0.1.0` from the `@gitppou/action` package version. Use that tag in workflows:
+
+```yaml
+- uses: your-org/gitppou@v0.1.0
+```
+
 The root `action.yml` runs:
 
 ```yaml
