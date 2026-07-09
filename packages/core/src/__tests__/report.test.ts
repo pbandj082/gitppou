@@ -90,6 +90,8 @@ describe("report helpers", () => {
     expect(html).toContain("<title>Daily Report - 2026-07-06</title>");
     expect(html).toContain("Noto+Sans+JP");
     expect(html).toContain('"Noto Sans JP"');
+    expect(html).toContain("themeVariables");
+    expect(html).toContain(".mermaid text");
     expect(html).toContain("&lt;script&gt;alert(1)&lt;/script&gt;");
     expect(html).not.toContain("<script>alert(1)</script>");
     expect(html).toContain('<pre class="mermaid">gantt');
