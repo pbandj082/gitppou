@@ -74,7 +74,9 @@ function escapeHtmlAttribute(value: string): string {
   return escapeHtml(value).replace(/`/g, "&#96;");
 }
 
-const REPORT_CSS = `:root {
+const REPORT_CSS = `@import url("https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600;700&display=block");
+
+:root {
   color-scheme: light;
   --bg: #f6f7f9;
   --paper: #ffffff;
@@ -83,6 +85,8 @@ const REPORT_CSS = `:root {
   --border: #d8dee4;
   --accent: #0969da;
   --code-bg: #f3f4f6;
+  --font-sans: "Noto Sans JP", "Noto Sans CJK JP", "Hiragino Sans", "Yu Gothic", YuGothic, Meiryo, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Noto Sans JP", "Noto Sans CJK JP", Meiryo, monospace;
 }
 
 * {
@@ -93,7 +97,9 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  font: 15px/1.75 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.75;
 }
 
 .report {
@@ -161,7 +167,7 @@ code {
   padding: 0.15em 0.3em;
   background: var(--code-bg);
   border-radius: 4px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 0.92em;
 }
 

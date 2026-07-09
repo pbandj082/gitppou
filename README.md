@@ -349,11 +349,13 @@ report:
 
 This keeps the source Markdown in `reports/`, the distributable HTML in `.gitppou/site/`, and PDFs in `.gitppou/pdf/`. If you later enable GitHub Pages, use a Pages workflow to upload `htmlDir` as the Pages artifact, or choose `docs` as `htmlDir` when using branch-based Pages publishing.
 
-PDF output requires Chrome or Chromium in the runtime environment. GitHub-hosted Ubuntu runners include a compatible browser. For custom runners or local preview, install Chrome or set:
+PDF output requires Chrome or Chromium in the runtime environment. GitHub-hosted Ubuntu runners include a compatible browser. Generated HTML loads Noto Sans JP from Google Fonts so Japanese text renders correctly even when the runner does not have Japanese system fonts. For custom runners or local preview, install Chrome or set:
 
 ```sh
 GITPPOU_CHROME_PATH=/path/to/chrome
 ```
+
+If the runtime cannot access Google Fonts, install a Japanese font such as Noto Sans CJK JP on the runner.
 
 ## Commit Behavior
 
