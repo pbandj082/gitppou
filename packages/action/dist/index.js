@@ -36679,6 +36679,10 @@ function buildGitppouConfig(rawConfig, options, env, now = new Date()) {
     if (Object.keys(githubTokensByOwner).length > 0) {
         config.githubTokensByOwner = githubTokensByOwner;
     }
+    const reportAuthor = getString(report, "author", "config.report.author");
+    if (reportAuthor) {
+        config.reportAuthor = reportAuthor;
+    }
     if (backlogDocument) {
         config.backlogDocument = backlogDocument;
     }
@@ -44510,7 +44514,7 @@ async function generateDailyReport(config, generatedAt = new Date()) {
             console.warn(`Gitppou warning: GitHub Models failed; using template report. ${formatError(error)}`);
         }
     }
-    reportMarkdown = addReportFrontMatter(normalizeMarkdownLinks(reportMarkdown), config, generatedAt);
+    reportMarkdown = addReportMetadataLine(normalizeMarkdownLinks(reportMarkdown), config, generatedAt);
     const reportPaths = [];
     const formats = config.reportFormats.length > 0 ? config.reportFormats : ["markdown"];
     const markdownPath = buildReportPath(config.reportDir, config.reportDate);
@@ -44560,34 +44564,55 @@ async function generateDailyReport(config, generatedAt = new Date()) {
         ...(backlogDocument ? { backlogDocument } : {}),
     };
 }
-function addReportFrontMatter(reportMarkdown, config, generatedAt) {
-    const context = config.githubActionsContext;
-    const fields = [
-        ["reportDate", config.reportDate],
-        ["timezone", config.reportTimezone],
-        ["author", config.githubUsername],
-        ["generatedBy", context?.actor ?? config.githubUsername],
-        ["generatedAt", generatedAt.toISOString()],
-        ["generator", "gitppou"],
-        ["repository", context?.repository],
-        ["ref", context?.refName],
-        ["workflow", context?.workflow],
-        ["runId", context?.runId],
-        ["runNumber", context?.runNumber],
-        ["eventName", context?.eventName],
-    ];
+function addReportMetadataLine(reportMarkdown, config, generatedAt) {
+    const lines = reportMarkdown.trimStart().split("\n");
+    const metadataLine = reportMetadataLine(config, generatedAt);
+    const headingIndex = lines.findIndex((line) => /^#\s+/.test(line));
+    if (headingIndex < 0) {
+        return [metadataLine, "", ...lines].join("\n");
+    }
+    const before = lines.slice(0, headingIndex + 1);
+    const after = lines.slice(headingIndex + 1);
     return [
-        "---",
-        ...fields
-            .filter((entry) => Boolean(entry[1]))
-            .map(([key, value]) => `${key}: ${yamlString(value)}`),
-        "---",
+        ...before,
         "",
-        reportMarkdown.trimStart(),
+        metadataLine,
+        "",
+        ...dropLeadingBlankLines(after),
     ].join("\n");
 }
-function yamlString(value) {
-    return JSON.stringify(value);
+function reportMetadataLine(config, generatedAt) {
+    const labels = config.reportLanguage === "ja"
+        ? { author: "作成者", generatedAt: "作成日時" }
+        : { author: "author", generatedAt: "generatedAt" };
+    return [
+        `**${labels.author}**: ${config.reportAuthor ?? config.githubUsername}`,
+        `**${labels.generatedAt}**: ${formatDateTimeInTimeZone(generatedAt, config.reportTimezone)}`,
+    ].join(" / ");
+}
+function formatDateTimeInTimeZone(date, timeZone) {
+    const parts = new Intl.DateTimeFormat("en-US", {
+        timeZone,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hourCycle: "h23",
+    }).formatToParts(date);
+    return `${dateTimePart(parts, "year")}-${dateTimePart(parts, "month")}-${dateTimePart(parts, "day")} ${dateTimePart(parts, "hour")}:${dateTimePart(parts, "minute")}:${dateTimePart(parts, "second")} (${timeZone})`;
+}
+function dateTimePart(parts, type) {
+    const value = parts.find((part) => part.type === type)?.value;
+    if (!value) {
+        throw new Error(`Could not format date time part "${type}".`);
+    }
+    return value;
+}
+function dropLeadingBlankLines(lines) {
+    const firstContentIndex = lines.findIndex((line) => line.trim() !== "");
+    return firstContentIndex < 0 ? [] : lines.slice(firstContentIndex);
 }
 async function generateSlackSummaryText(config, reportMarkdown) {
     if (!config.slackNotify || config.llmProvider !== "github-models") {

@@ -55,7 +55,7 @@ export async function generateDailyReport(
       );
     }
   }
-  reportMarkdown = addReportFrontMatter(
+  reportMarkdown = addReportMetadataLine(
     normalizeMarkdownLinks(reportMarkdown),
     config,
     generatedAt,
@@ -128,40 +128,70 @@ export async function generateDailyReport(
   };
 }
 
-function addReportFrontMatter(
+function addReportMetadataLine(
   reportMarkdown: string,
   config: GitppouConfig,
   generatedAt: Date,
 ): string {
-  const context = config.githubActionsContext;
-  const fields: Array<[string, string | undefined]> = [
-    ["reportDate", config.reportDate],
-    ["timezone", config.reportTimezone],
-    ["author", config.githubUsername],
-    ["generatedBy", context?.actor ?? config.githubUsername],
-    ["generatedAt", generatedAt.toISOString()],
-    ["generator", "gitppou"],
-    ["repository", context?.repository],
-    ["ref", context?.refName],
-    ["workflow", context?.workflow],
-    ["runId", context?.runId],
-    ["runNumber", context?.runNumber],
-    ["eventName", context?.eventName],
-  ];
+  const lines = reportMarkdown.trimStart().split("\n");
+  const metadataLine = reportMetadataLine(config, generatedAt);
+  const headingIndex = lines.findIndex((line) => /^#\s+/.test(line));
+  if (headingIndex < 0) {
+    return [metadataLine, "", ...lines].join("\n");
+  }
 
+  const before = lines.slice(0, headingIndex + 1);
+  const after = lines.slice(headingIndex + 1);
   return [
-    "---",
-    ...fields
-      .filter((entry): entry is [string, string] => Boolean(entry[1]))
-      .map(([key, value]) => `${key}: ${yamlString(value)}`),
-    "---",
+    ...before,
     "",
-    reportMarkdown.trimStart(),
+    metadataLine,
+    "",
+    ...dropLeadingBlankLines(after),
   ].join("\n");
 }
 
-function yamlString(value: string): string {
-  return JSON.stringify(value);
+function reportMetadataLine(config: GitppouConfig, generatedAt: Date): string {
+  const labels =
+    config.reportLanguage === "ja"
+      ? { author: "作成者", generatedAt: "作成日時" }
+      : { author: "author", generatedAt: "generatedAt" };
+  return [
+    `**${labels.author}**: ${config.reportAuthor ?? config.githubUsername}`,
+    `**${labels.generatedAt}**: ${formatDateTimeInTimeZone(generatedAt, config.reportTimezone)}`,
+  ].join(" / ");
+}
+
+function formatDateTimeInTimeZone(date: Date, timeZone: string): string {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date);
+
+  return `${dateTimePart(parts, "year")}-${dateTimePart(parts, "month")}-${dateTimePart(parts, "day")} ${dateTimePart(parts, "hour")}:${dateTimePart(parts, "minute")}:${dateTimePart(parts, "second")} (${timeZone})`;
+}
+
+function dateTimePart(
+  parts: Intl.DateTimeFormatPart[],
+  type: Intl.DateTimeFormatPartTypes,
+): string {
+  const value = parts.find((part) => part.type === type)?.value;
+  if (!value) {
+    throw new Error(`Could not format date time part "${type}".`);
+  }
+
+  return value;
+}
+
+function dropLeadingBlankLines(lines: string[]): string[] {
+  const firstContentIndex = lines.findIndex((line) => line.trim() !== "");
+  return firstContentIndex < 0 ? [] : lines.slice(firstContentIndex);
 }
 
 async function generateSlackSummaryText(

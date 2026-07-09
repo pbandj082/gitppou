@@ -57,6 +57,7 @@ export type GitppouConfig = {
   backlogDocument?: BacklogDocumentConfig;
 
   reportDate: string;
+  reportAuthor?: string;
   reportTimezone: string;
   reportLanguage: ReportLanguage;
   reportDir: string;

@@ -108,9 +108,9 @@ describe("report helpers", () => {
     expect(date).toBe("2026-07-03");
   });
 
-  it("adds YAML front matter metadata to generated reports", async () => {
+  it("adds compact localized metadata under the report heading", async () => {
     await mkdir(".gitppou/test-reports", { recursive: true });
-    const reportDir = await mkdtemp(".gitppou/test-reports/front-matter-");
+    const reportDir = await mkdtemp(".gitppou/test-reports/metadata-");
 
     try {
       const result = await generateDailyReport(
@@ -118,6 +118,8 @@ describe("report helpers", () => {
           ...baseConfig,
           githubRepos: [],
           backlogSpaces: [],
+          reportLanguage: "ja",
+          reportAuthor: "栁田真弘",
           reportDir,
           githubActionsContext: {
             actor: "hubot",
@@ -133,8 +135,10 @@ describe("report helpers", () => {
       );
 
       expect(result.reportMarkdown).toMatch(
-        /^---\nreportDate: "2026-07-06"\ntimezone: "Asia\/Tokyo"\nauthor: "octocat"\ngeneratedBy: "hubot"\ngeneratedAt: "2026-07-06T10:00:00.000Z"\ngenerator: "gitppou"\nrepository: "owner\/repo"\nref: "main"\nworkflow: "Daily Report"\nrunId: "123"\nrunNumber: "42"\neventName: "workflow_dispatch"\n---\n\n# Daily Report - 2026-07-06/,
+        /^# 日報 - 2026-07-06\n\n\*\*作成者\*\*: 栁田真弘 \/ \*\*作成日時\*\*: 2026-07-06 19:00:00 \(Asia\/Tokyo\)\n\n## 本日対応したこと/,
       );
+      expect(result.reportMarkdown).not.toContain("generatedBy");
+      expect(result.reportMarkdown).not.toContain("---\nreportDate:");
     } finally {
       await rm(reportDir, { recursive: true, force: true });
     }
