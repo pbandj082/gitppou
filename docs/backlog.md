@@ -75,6 +75,9 @@ Use `projectKey` for a readable config, or `projectId` to skip the project
 lookup. `parentId` is the parent Backlog document ID used as the destination in
 the document tree; you can look up candidate IDs from Backlog's document tree
 API. The title supports `{{date}}`.
+Gitppou can include the Backlog document URL in Slack notifications when
+`projectKey` is configured, because Backlog document URLs include the project
+key.
 
 Document publishing can be used without Backlog activity collection:
 
@@ -88,6 +91,8 @@ backlog:
 
 When `git.commitReport: true` in GitHub Actions, Gitppou publishes the Backlog
 document after the report files have been committed successfully.
+When Slack notification is also enabled, the Slack details section includes the
+created Backlog document URL.
 
 ## What Gitppou Collects
 

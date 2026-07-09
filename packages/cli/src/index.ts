@@ -189,6 +189,9 @@ async function runPreview(options: CliOptions): Promise<void> {
     console.log(
       `Backlog document created: ${result.backlogDocument.title} (${result.backlogDocument.id})`,
     );
+    if (result.backlogDocument.url) {
+      console.log(`Backlog document URL: ${result.backlogDocument.url}`);
+    }
   }
   console.log(
     `Slack notification: ${config.slackNotify ? "requested" : "skipped"}`,

@@ -41,6 +41,8 @@ type BacklogDocumentResponse = {
   id: string;
   projectId: number;
   title: string;
+  created?: string;
+  updated?: string;
 };
 
 type BacklogNamedValue = {
@@ -157,10 +159,14 @@ export async function publishBacklogDocument(
     },
   );
 
+  const url = buildDocumentUrl(documentConfig, response.id);
   return {
     id: response.id,
     projectId: response.projectId,
     title: response.title,
+    ...(url ? { url } : {}),
+    ...(response.created ? { created: response.created } : {}),
+    ...(response.updated ? { updated: response.updated } : {}),
   };
 }
 
@@ -196,6 +202,17 @@ function documentTitle(config: BacklogDocumentContext): string {
     /\{\{\s*date\s*\}\}/g,
     config.reportDate,
   );
+}
+
+function buildDocumentUrl(
+  config: BacklogRequestContext & { projectKey?: string },
+  documentId: string,
+): string | undefined {
+  if (!config.projectKey) {
+    return undefined;
+  }
+
+  return `https://${backlogHost(config)}/document/${encodeURIComponent(config.projectKey)}/${encodeURIComponent(documentId)}`;
 }
 
 async function fetchBacklogSpaceActivities(

@@ -40,6 +40,9 @@ export type BacklogDocumentResult = {
   id: string;
   projectId: number;
   title: string;
+  url?: string;
+  created?: string;
+  updated?: string;
 };
 
 export type GitppouConfig = {
@@ -126,5 +129,6 @@ export type ReportResult = {
   reportPaths: string[];
   reportMarkdown: string;
   slackSummary: string;
+  slackSummaryText?: string;
   backlogDocument?: BacklogDocumentResult;
 };

@@ -98,6 +98,10 @@ Example:
 reports/2026-07/2026-07-03.md
 ```
 
+Markdown reports start with YAML front matter containing report metadata such
+as `reportDate`, `timezone`, `author`, `generatedBy`, `generatedAt`, and GitHub
+Actions context when available.
+
 To also save a rendered HTML report:
 
 ```yaml
@@ -280,7 +284,7 @@ backlog:
     addLast: true
 ```
 
-`backlog.document.projectKey` is resolved to a numeric project ID through Backlog `/projects`. You can use `projectId` instead to skip that lookup. `parentId` is the parent Backlog document ID used as the destination folder in the document tree; you can look up candidate IDs from Backlog's document tree API. When `git.commitReport: true` in GitHub Actions, Gitppou creates the Backlog document after the report commit succeeds.
+`backlog.document.projectKey` is resolved to a numeric project ID through Backlog `/projects`. You can use `projectId` instead to skip that lookup. `parentId` is the parent Backlog document ID used as the destination folder in the document tree; you can look up candidate IDs from Backlog's document tree API. Gitppou can include the Backlog document URL in Slack notifications when `projectKey` is configured, because Backlog document URLs include the project key. When `git.commitReport: true` in GitHub Actions, Gitppou creates the Backlog document after the report commit succeeds.
 
 Omit Backlog or disable it to generate a GitHub-only report:
 
@@ -354,7 +358,7 @@ env:
   SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
 ```
 
-Slack receives a short prose summary, not the full raw activity. With `llm.provider: github-models`, the Slack summary is generated from the final report; otherwise Gitppou falls back to a local heading-based summary. When running in GitHub Actions, the summary includes the actor, workflow, repository/ref, and a list of links to every generated report file in the repository. Slack failures are warnings in v1 and do not fail the action.
+Slack receives a short prose summary, not the full raw activity. With `llm.provider: github-models`, the Slack summary is generated from the final report; otherwise Gitppou falls back to a local heading-based summary. When running in GitHub Actions, the summary includes the actor, workflow, repository/ref, and a list of links to every generated report file in the repository. If Backlog document publishing is enabled, Slack also includes the created Backlog document link. Slack failures are warnings in v1 and do not fail the action.
 
 ## HTML and PDF Reports
 

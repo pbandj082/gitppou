@@ -109,6 +109,27 @@ describe("generateSlackSummary", () => {
     );
   });
 
+  it("includes the Backlog document link when it is available", () => {
+    const summary = generateSlackSummary(
+      baseConfig,
+      ".gitppou/reports/2026-07/2026-07-06.md",
+      "# 日報 - 2026-07-06",
+      "日報を作成しました。",
+      {
+        backlogDocument: {
+          id: "document-id",
+          projectId: 456,
+          title: "Daily Report 2026-07-06",
+          url: "https://example.backlog.com/document/APP/document-id",
+        },
+      },
+    );
+
+    expect(summary).toContain(
+      "- Backlogドキュメント: <https://example.backlog.com/document/APP/document-id|Daily Report 2026-07-06>",
+    );
+  });
+
   it("uses plain heading text when local summaries read linked headings", () => {
     const summary = generateSlackSummary(
       baseConfig,

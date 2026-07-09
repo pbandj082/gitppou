@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   commitReportIfNeeded: vi.fn(),
   generateDailyReport: vi.fn(),
+  generateSlackSummary: vi.fn(),
   publishBacklogDocument: vi.fn(),
   readActionConfig: vi.fn(),
   sendSlackNotification: vi.fn(),
@@ -21,6 +22,7 @@ vi.mock("@actions/core", () => ({
 
 vi.mock("@gitppou/core", () => ({
   generateDailyReport: mocks.generateDailyReport,
+  generateSlackSummary: mocks.generateSlackSummary,
   publishBacklogDocument: mocks.publishBacklogDocument,
   sendSlackNotification: mocks.sendSlackNotification,
 }));
@@ -71,6 +73,7 @@ beforeEach(() => {
   vi.resetModules();
   mocks.commitReportIfNeeded.mockReset();
   mocks.generateDailyReport.mockReset();
+  mocks.generateSlackSummary.mockReset();
   mocks.publishBacklogDocument.mockReset();
   mocks.readActionConfig.mockReset();
   mocks.sendSlackNotification.mockReset();
@@ -128,19 +131,27 @@ describe("action entrypoint", () => {
         space: "example",
         projectId: 456,
       },
+      slackNotify: true,
     };
     mocks.readActionConfig.mockResolvedValue(config);
-    mocks.generateDailyReport.mockResolvedValue(reportResult);
-    mocks.publishBacklogDocument.mockResolvedValue({
+    mocks.generateDailyReport.mockResolvedValue({
+      ...reportResult,
+      slackSummaryText: "LLM summary",
+    });
+    const backlogDocument = {
       id: "document-id",
       projectId: 456,
       title: "Daily Report 2026-07-08",
-    });
+      url: "https://example.backlog.com/document/APP/document-id",
+    };
+    mocks.publishBacklogDocument.mockResolvedValue(backlogDocument);
+    mocks.generateSlackSummary.mockReturnValue("summary with Backlog document");
 
     await import("../index.js");
 
     expect(mocks.generateDailyReport).toHaveBeenCalledWith({
       ...config,
+      deferSlackNotification: true,
       deferBacklogDocumentPublish: true,
     });
     const commitOrder = mocks.commitReportIfNeeded.mock.invocationCallOrder[0];
@@ -157,6 +168,21 @@ describe("action entrypoint", () => {
     expect(mocks.setOutput).toHaveBeenCalledWith(
       "backlog-document-title",
       "Daily Report 2026-07-08",
+    );
+    expect(mocks.setOutput).toHaveBeenCalledWith(
+      "backlog-document-url",
+      "https://example.backlog.com/document/APP/document-id",
+    );
+    expect(mocks.generateSlackSummary).toHaveBeenCalledWith(
+      config,
+      reportResult.reportPaths,
+      "# 日報",
+      "LLM summary",
+      { backlogDocument },
+    );
+    expect(mocks.sendSlackNotification).toHaveBeenCalledWith(
+      undefined,
+      "summary with Backlog document",
     );
   });
 });

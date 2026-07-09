@@ -1,3 +1,4 @@
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import { resolveReportDate } from "../config.js";
 import { renderReportHtml } from "../html.js";
@@ -6,6 +7,7 @@ import {
   buildReportHtmlPath,
   buildReportPath,
   buildReportPdfPath,
+  generateDailyReport,
 } from "../report.js";
 import type { GitppouConfig, NormalizedActivity } from "../types.js";
 
@@ -104,6 +106,38 @@ describe("report helpers", () => {
       new Date("2026-07-02T15:30:00Z"),
     );
     expect(date).toBe("2026-07-03");
+  });
+
+  it("adds YAML front matter metadata to generated reports", async () => {
+    await mkdir(".gitppou/test-reports", { recursive: true });
+    const reportDir = await mkdtemp(".gitppou/test-reports/front-matter-");
+
+    try {
+      const result = await generateDailyReport(
+        {
+          ...baseConfig,
+          githubRepos: [],
+          backlogSpaces: [],
+          reportDir,
+          githubActionsContext: {
+            actor: "hubot",
+            eventName: "workflow_dispatch",
+            refName: "main",
+            repository: "owner/repo",
+            runId: "123",
+            runNumber: "42",
+            workflow: "Daily Report",
+          },
+        },
+        new Date("2026-07-06T10:00:00Z"),
+      );
+
+      expect(result.reportMarkdown).toMatch(
+        /^---\nreportDate: "2026-07-06"\ntimezone: "Asia\/Tokyo"\nauthor: "octocat"\ngeneratedBy: "hubot"\ngeneratedAt: "2026-07-06T10:00:00.000Z"\ngenerator: "gitppou"\nrepository: "owner\/repo"\nref: "main"\nworkflow: "Daily Report"\nrunId: "123"\nrunNumber: "42"\neventName: "workflow_dispatch"\n---\n\n# Daily Report - 2026-07-06/,
+      );
+    } finally {
+      await rm(reportDir, { recursive: true, force: true });
+    }
   });
 
   it("keeps a blank line after every markdown heading", () => {
