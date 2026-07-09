@@ -15,24 +15,31 @@ async function main(): Promise<void> {
       sendSlackAfterCommit
         ? {
             ...config,
-            deferSlackNotification: true
+            deferSlackNotification: true,
           }
-        : config
+        : config,
     );
 
     core.setOutput("report-path", result.reportPath);
+    core.setOutput("report-paths", result.reportPaths.join("\n"));
+    if (result.reportHtmlPath) {
+      core.setOutput("report-html-path", result.reportHtmlPath);
+    }
     core.setOutput("report-markdown", result.reportMarkdown);
 
     if (config.commitReport) {
       await commitReportIfNeeded({
-        reportPath: result.reportPath,
-        reportDate: config.reportDate
+        reportPaths: result.reportPaths,
+        reportDate: config.reportDate,
       });
     }
 
     if (sendSlackAfterCommit) {
       try {
-        await sendSlackNotification(config.slackWebhookUrl, result.slackSummary);
+        await sendSlackNotification(
+          config.slackWebhookUrl,
+          result.slackSummary,
+        );
       } catch (error) {
         core.warning(`Slack notification failed. ${formatError(error)}`);
       }

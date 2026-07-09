@@ -1,7 +1,7 @@
 import * as exec from "@actions/exec";
 
 type CommitReportOptions = {
-  reportPath: string;
+  reportPaths: string[];
   reportDate: string;
 };
 
@@ -9,14 +9,21 @@ export async function syncReportBranchBeforeWrite(): Promise<void> {
   await git(["pull", "--ff-only"]);
 }
 
-export async function commitReportIfNeeded({ reportPath, reportDate }: CommitReportOptions): Promise<void> {
+export async function commitReportIfNeeded({
+  reportPaths,
+  reportDate,
+}: CommitReportOptions): Promise<void> {
   await git(["config", "user.name", "gitppou[bot]"]);
   await git(["config", "user.email", "gitppou[bot]@users.noreply.github.com"]);
-  await git(["add", "--", reportPath]);
+  await git(["add", "--", ...reportPaths]);
 
-  const diffCode = await exec.exec("git", ["diff", "--cached", "--quiet", "--", reportPath], {
-    ignoreReturnCode: true
-  });
+  const diffCode = await exec.exec(
+    "git",
+    ["diff", "--cached", "--quiet", "--", ...reportPaths],
+    {
+      ignoreReturnCode: true,
+    },
+  );
 
   if (diffCode === 0) {
     console.log("No report changes to commit.");
@@ -27,7 +34,13 @@ export async function commitReportIfNeeded({ reportPath, reportDate }: CommitRep
     throw new Error(`git diff failed with exit code ${diffCode}.`);
   }
 
-  await git(["commit", "-m", `Add daily report ${reportDate}`, "--", reportPath]);
+  await git([
+    "commit",
+    "-m",
+    `Add daily report ${reportDate}`,
+    "--",
+    ...reportPaths,
+  ]);
   await pushWithRemoteSync();
 }
 
@@ -56,6 +69,6 @@ async function git(args: string[]): Promise<void> {
 
 async function gitExit(args: string[]): Promise<number> {
   return exec.exec("git", args, {
-    ignoreReturnCode: true
+    ignoreReturnCode: true,
   });
 }

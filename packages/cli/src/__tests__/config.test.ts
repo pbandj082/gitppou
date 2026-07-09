@@ -5,7 +5,7 @@ const env = {
   GITHUB_TOKEN: "github-token",
   GITPPOU_TOKEN_ORG_A: "org-a-token",
   BACKLOG_API_KEY: "backlog-key",
-  SLACK_WEBHOOK_URL: "https://example.com/slack"
+  SLACK_WEBHOOK_URL: "https://example.com/slack",
 };
 
 describe("buildPreviewConfig", () => {
@@ -17,27 +17,27 @@ describe("buildPreviewConfig", () => {
           repos: ["owner/repo"],
           tokenEnv: "GITHUB_TOKEN",
           tokens: {
-            "org-a": "GITPPOU_TOKEN_ORG_A"
-          }
+            "org-a": "GITPPOU_TOKEN_ORG_A",
+          },
         },
         backlog: {
           userId: "123",
           spaces: {
             example: {
-              projectKeys: ["APP"]
-            }
-          }
-        }
+              projectKeys: ["APP"],
+            },
+          },
+        },
       },
       {},
       env,
-      new Date("2026-07-05T15:30:00Z")
+      new Date("2026-07-05T15:30:00Z"),
     );
 
     expect(config).toMatchObject({
       githubToken: "github-token",
       githubTokensByOwner: {
-        "org-a": "org-a-token"
+        "org-a": "org-a-token",
       },
       githubUsername: "octocat",
       githubRepos: ["owner/repo"],
@@ -46,17 +46,19 @@ describe("buildPreviewConfig", () => {
       backlogSpaces: [
         {
           space: "example",
-          projectKeys: ["APP"]
-        }
+          projectKeys: ["APP"],
+        },
       ],
       reportDate: "2026-07-06",
       reportTimezone: "Asia/Tokyo",
       reportLanguage: "en",
       reportDir: "reports",
+      reportFormats: ["markdown"],
+      reportHtmlDir: ".gitppou/site",
       commitReport: false,
       slackNotify: false,
       llmProvider: "template",
-      llmStyle: "concise"
+      llmStyle: "concise",
     });
     expect(config.slackWebhookUrl).toBeUndefined();
   });
@@ -65,33 +67,33 @@ describe("buildPreviewConfig", () => {
     const config = buildPreviewConfig(
       {
         github: {
-          username: "octocat"
+          username: "octocat",
         },
         backlog: {
           userId: "123",
           spaces: {
             example: {
-              projectKeys: ["APP"]
+              projectKeys: ["APP"],
             },
             other: {
-              projectKeys: ["OPS"]
-            }
-          }
-        }
+              projectKeys: ["OPS"],
+            },
+          },
+        },
       },
       {},
-      env
+      env,
     );
 
     expect(config.backlogSpaces).toEqual([
       {
         space: "example",
-        projectKeys: ["APP"]
+        projectKeys: ["APP"],
       },
       {
         space: "other",
-        projectKeys: ["OPS"]
-      }
+        projectKeys: ["OPS"],
+      },
     ]);
     expect(config.backlogApiKey).toBe("backlog-key");
     expect(config.backlogUserId).toBe("123");
@@ -101,27 +103,27 @@ describe("buildPreviewConfig", () => {
     const config = buildPreviewConfig(
       {
         github: {
-          username: "octocat"
+          username: "octocat",
         },
         backlog: {
           spaces: {
             example: {
               host: "https://example.backlog.jp/",
-              projectKeys: ["APP"]
-            }
-          }
-        }
+              projectKeys: ["APP"],
+            },
+          },
+        },
       },
       {},
-      env
+      env,
     );
 
     expect(config.backlogSpaces).toEqual([
       {
         space: "example",
         host: "example.backlog.jp",
-        projectKeys: ["APP"]
-      }
+        projectKeys: ["APP"],
+      },
     ]);
   });
 
@@ -130,23 +132,23 @@ describe("buildPreviewConfig", () => {
       {
         github: {
           username: "octocat",
-          repos: ["owner/repo"]
+          repos: ["owner/repo"],
         },
         backlog: {
-          enabled: false
-        }
+          enabled: false,
+        },
       },
       {},
       {
-        GITHUB_TOKEN: "github-token"
-      }
+        GITHUB_TOKEN: "github-token",
+      },
     );
 
     expect(config).toMatchObject({
       githubToken: "github-token",
       githubUsername: "octocat",
       githubRepos: ["owner/repo"],
-      backlogSpaces: []
+      backlogSpaces: [],
     });
     expect(config.backlogApiKey).toBeUndefined();
   });
@@ -156,18 +158,18 @@ describe("buildPreviewConfig", () => {
       {
         github: {
           username: "octocat",
-          repos: ["owner/repo"]
-        }
+          repos: ["owner/repo"],
+        },
       },
       {},
       {
-        GITHUB_TOKEN: "github-token"
-      }
+        GITHUB_TOKEN: "github-token",
+      },
     );
 
     expect(config).toMatchObject({
       githubToken: "github-token",
-      backlogSpaces: []
+      backlogSpaces: [],
     });
     expect(config.backlogApiKey).toBeUndefined();
   });
@@ -177,15 +179,15 @@ describe("buildPreviewConfig", () => {
       buildPreviewConfig(
         {
           github: {
-            username: "octocat"
+            username: "octocat",
           },
           backlog: {
-            space: "example"
-          }
+            space: "example",
+          },
         },
         {},
-        env
-      )
+        env,
+      ),
     ).toThrow("config.backlog uses spaces only.");
   });
 
@@ -194,18 +196,18 @@ describe("buildPreviewConfig", () => {
       buildPreviewConfig(
         {
           github: {
-            username: "octocat"
+            username: "octocat",
           },
           backlog: {
             userId: "admin",
             spaces: {
-              example: {}
-            }
-          }
+              example: {},
+            },
+          },
         },
         {},
-        env
-      )
+        env,
+      ),
     ).toThrow("numeric Backlog user id");
   });
 
@@ -220,19 +222,19 @@ describe("buildPreviewConfig", () => {
               "org-a": {
                 limit: 20,
                 sort: "pushed",
-                includeForks: true
-              }
-            }
-          ]
+                includeForks: true,
+              },
+            },
+          ],
         },
         backlog: {
           spaces: {
-            example: {}
-          }
-        }
+            example: {},
+          },
+        },
       },
       {},
-      env
+      env,
     );
 
     expect(config.githubRepos).toEqual([
@@ -241,8 +243,8 @@ describe("buildPreviewConfig", () => {
         owner: "org-a",
         limit: 20,
         sort: "pushed",
-        includeForks: true
-      }
+        includeForks: true,
+      },
     ]);
   });
 
@@ -255,20 +257,20 @@ describe("buildPreviewConfig", () => {
             repos: [
               {
                 "org-a": {
-                  limit: 101
-                }
-              }
-            ]
+                  limit: 101,
+                },
+              },
+            ],
           },
           backlog: {
             spaces: {
-              example: {}
-            }
-          }
+              example: {},
+            },
+          },
         },
         {},
-        env
-      )
+        env,
+      ),
     ).toThrow("github.repos[0].org-a.limit must be less than or equal to 100.");
   });
 
@@ -281,19 +283,19 @@ describe("buildPreviewConfig", () => {
             repos: [
               {
                 "org-a": null,
-                limit: 20
-              }
-            ]
+                limit: 20,
+              },
+            ],
           },
           backlog: {
             spaces: {
-              example: {}
-            }
-          }
+              example: {},
+            },
+          },
         },
         {},
-        env
-      )
+        env,
+      ),
     ).toThrow("indent selector options under the owner key");
   });
 
@@ -302,23 +304,23 @@ describe("buildPreviewConfig", () => {
       {
         github: {
           username: "octocat",
-          repos: []
+          repos: [],
         },
         backlog: {
           spaces: {
-            example: {}
-          }
+            example: {},
+          },
         },
         report: {
           date: "2026-07-01",
           language: "en",
-          dir: "reports"
+          dir: "reports",
         },
         llm: {
           provider: "template",
           maxInputChars: 1000,
-          style: "concise"
-        }
+          style: "concise",
+        },
       },
       {
         reportDate: "2026-07-02",
@@ -327,9 +329,9 @@ describe("buildPreviewConfig", () => {
         llmProvider: "github-models",
         llmMaxInputChars: "2000",
         llmStyle: "detailed",
-        slackNotify: true
+        slackNotify: true,
       },
-      env
+      env,
     );
 
     expect(config).toMatchObject({
@@ -340,8 +342,56 @@ describe("buildPreviewConfig", () => {
       slackWebhookUrl: "https://example.com/slack",
       llmProvider: "github-models",
       llmMaxInputChars: 2000,
-      llmStyle: "detailed"
+      llmStyle: "detailed",
     });
+  });
+
+  it("builds report output format settings from config", () => {
+    const config = buildPreviewConfig(
+      {
+        github: {
+          username: "octocat",
+          repos: ["owner/repo"],
+        },
+        backlog: {
+          enabled: false,
+        },
+        report: {
+          formats: ["markdown", "html", "html"],
+          htmlDir: "public/daily-reports",
+        },
+      },
+      {},
+      {
+        GITHUB_TOKEN: "github-token",
+      },
+    );
+
+    expect(config.reportFormats).toEqual(["markdown", "html"]);
+    expect(config.reportHtmlDir).toBe("public/daily-reports");
+  });
+
+  it("rejects unknown report output formats", () => {
+    expect(() =>
+      buildPreviewConfig(
+        {
+          github: {
+            username: "octocat",
+            repos: ["owner/repo"],
+          },
+          backlog: {
+            enabled: false,
+          },
+          report: {
+            formats: ["pdf"],
+          },
+        },
+        {},
+        {
+          GITHUB_TOKEN: "github-token",
+        },
+      ),
+    ).toThrow("config.report.formats must contain only markdown or html.");
   });
 
   it("requires API credentials from environment variables", () => {
@@ -349,17 +399,17 @@ describe("buildPreviewConfig", () => {
       buildPreviewConfig(
         {
           github: {
-            username: "octocat"
+            username: "octocat",
           },
           backlog: {
             spaces: {
-              example: {}
-            }
-          }
+              example: {},
+            },
+          },
         },
         {},
-        {}
-      )
+        {},
+      ),
     ).toThrow("GITHUB_TOKEN");
   });
 
@@ -368,31 +418,34 @@ describe("buildPreviewConfig", () => {
       buildPreviewConfig(
         {
           github: {
-            username: "octocat"
+            username: "octocat",
           },
           backlog: {
             spaces: {
-              example: {}
-            }
-          }
+              example: {},
+            },
+          },
         },
         {},
         {
-          GITHUB_TOKEN: "github-token"
-        }
-      )
+          GITHUB_TOKEN: "github-token",
+        },
+      ),
     ).toThrow("BACKLOG_API_KEY");
   });
 
   it("loads env file values without overriding explicit environment variables", async () => {
-    const loadedEnv = await loadPreviewEnv("src/__tests__/fixtures/.env.preview", {
-      GITHUB_TOKEN: "shell-github-token"
-    });
+    const loadedEnv = await loadPreviewEnv(
+      "src/__tests__/fixtures/.env.preview",
+      {
+        GITHUB_TOKEN: "shell-github-token",
+      },
+    );
 
     expect(loadedEnv).toMatchObject({
       GITHUB_TOKEN: "shell-github-token",
       BACKLOG_API_KEY: "file-backlog-key",
-      SLACK_WEBHOOK_URL: "https://example.com/file-slack"
+      SLACK_WEBHOOK_URL: "https://example.com/file-slack",
     });
   });
 });

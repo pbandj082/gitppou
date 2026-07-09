@@ -11,9 +11,15 @@ type CliOptions = PreviewConfigOptions & {
 };
 
 type ParsedValues = Record<string, string | boolean | undefined>;
-type PreviewStringOptionKey = Exclude<{
-  [Key in keyof PreviewConfigOptions]: PreviewConfigOptions[Key] extends string | undefined ? Key : never;
-}[keyof PreviewConfigOptions], undefined>;
+type PreviewStringOptionKey = Exclude<
+  {
+    [Key in keyof PreviewConfigOptions]: PreviewConfigOptions[Key] extends
+      string | undefined
+      ? Key
+      : never;
+  }[keyof PreviewConfigOptions],
+  undefined
+>;
 
 async function main(args: string[]): Promise<number> {
   let options: CliOptions;
@@ -61,8 +67,8 @@ function parseCliArgs(args: string[]): CliOptions {
       slack: { type: "boolean" },
       print: { type: "boolean" },
       json: { type: "boolean" },
-      help: { type: "boolean", short: "h" }
-    }
+      help: { type: "boolean", short: "h" },
+    },
   });
   const values = parsed.values as ParsedValues;
   const command = parsed.positionals[0] ?? "help";
@@ -84,30 +90,66 @@ function parseCliArgs(args: string[]): CliOptions {
     printMarkdown: Boolean(values.print),
     jsonOutput: Boolean(values.json),
     help: Boolean(values.help),
-    slackNotify: Boolean(values.slack)
+    slackNotify: Boolean(values.slack),
   };
-  assignStringOption(options, "configPath", readStringOption(values, "config", "--config"));
-  assignStringOption(options, "envFilePath", readStringOption(values, "env-file", "--env-file"));
-  assignStringOption(options, "reportDate", readFirstStringOption(values, ["date", "report-date"], "report date"));
+  assignStringOption(
+    options,
+    "configPath",
+    readStringOption(values, "config", "--config"),
+  );
+  assignStringOption(
+    options,
+    "envFilePath",
+    readStringOption(values, "env-file", "--env-file"),
+  );
+  assignStringOption(
+    options,
+    "reportDate",
+    readFirstStringOption(values, ["date", "report-date"], "report date"),
+  );
   assignStringOption(
     options,
     "reportTimezone",
-    readFirstStringOption(values, ["timezone", "report-timezone"], "report timezone")
+    readFirstStringOption(
+      values,
+      ["timezone", "report-timezone"],
+      "report timezone",
+    ),
   );
   assignStringOption(
     options,
     "reportLanguage",
-    readFirstStringOption(values, ["language", "report-language"], "report language")
+    readFirstStringOption(
+      values,
+      ["language", "report-language"],
+      "report language",
+    ),
   );
-  assignStringOption(options, "reportDir", readStringOption(values, "report-dir", "--report-dir"));
-  assignStringOption(options, "llmProvider", readStringOption(values, "llm-provider", "--llm-provider"));
-  assignStringOption(options, "llmModel", readStringOption(values, "llm-model", "--llm-model"));
+  assignStringOption(
+    options,
+    "reportDir",
+    readStringOption(values, "report-dir", "--report-dir"),
+  );
+  assignStringOption(
+    options,
+    "llmProvider",
+    readStringOption(values, "llm-provider", "--llm-provider"),
+  );
+  assignStringOption(
+    options,
+    "llmModel",
+    readStringOption(values, "llm-model", "--llm-model"),
+  );
   assignStringOption(
     options,
     "llmMaxInputChars",
-    readStringOption(values, "llm-max-input-chars", "--llm-max-input-chars")
+    readStringOption(values, "llm-max-input-chars", "--llm-max-input-chars"),
   );
-  assignStringOption(options, "llmStyle", readStringOption(values, "llm-style", "--llm-style"));
+  assignStringOption(
+    options,
+    "llmStyle",
+    readStringOption(values, "llm-style", "--llm-style"),
+  );
 
   return options;
 }
@@ -123,21 +165,27 @@ async function runPreview(options: CliOptions): Promise<void> {
           configPath,
           reportDate: config.reportDate,
           reportPath: result.reportPath,
+          reportPaths: result.reportPaths,
+          reportHtmlPath: result.reportHtmlPath,
           reportMarkdown: result.reportMarkdown,
           slackSummary: result.slackSummary,
-          slackNotify: config.slackNotify
+          slackNotify: config.slackNotify,
         },
         null,
-        2
-      )
+        2,
+      ),
     );
     return;
   }
 
   console.log(`Config: ${configPath}`);
   console.log(`Report date: ${config.reportDate}`);
-  console.log(`Report written: ${result.reportPath}`);
-  console.log(`Slack notification: ${config.slackNotify ? "requested" : "skipped"}`);
+  for (const reportPath of result.reportPaths) {
+    console.log(`Report written: ${reportPath}`);
+  }
+  console.log(
+    `Slack notification: ${config.slackNotify ? "requested" : "skipped"}`,
+  );
 
   if (options.printMarkdown) {
     console.log("");
@@ -148,17 +196,24 @@ async function runPreview(options: CliOptions): Promise<void> {
 function assignStringOption(
   target: PreviewConfigOptions,
   key: PreviewStringOptionKey,
-  value: string | undefined
+  value: string | undefined,
 ): void {
   if (value !== undefined) {
     target[key] = value;
   }
 }
 
-function readFirstStringOption(values: ParsedValues, keys: string[], label: string): string | undefined {
+function readFirstStringOption(
+  values: ParsedValues,
+  keys: string[],
+  label: string,
+): string | undefined {
   const found = keys
     .map((key) => [key, values[key]] as const)
-    .filter((entry): entry is readonly [string, string] => typeof entry[1] === "string");
+    .filter(
+      (entry): entry is readonly [string, string] =>
+        typeof entry[1] === "string",
+    );
 
   if (found.length > 1) {
     throw new Error(`Specify ${label} only once.`);
@@ -167,7 +222,11 @@ function readFirstStringOption(values: ParsedValues, keys: string[], label: stri
   return found[0]?.[1];
 }
 
-function readStringOption(values: ParsedValues, key: string, label: string): string | undefined {
+function readStringOption(
+  values: ParsedValues,
+  key: string,
+  label: string,
+): string | undefined {
   const value = values[key];
   if (value === undefined) {
     return undefined;

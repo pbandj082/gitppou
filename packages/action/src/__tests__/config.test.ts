@@ -2,13 +2,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { readActionConfig } from "../config.js";
 
 const { inputs } = vi.hoisted(() => ({
-  inputs: new Map<string, string>()
+  inputs: new Map<string, string>(),
 }));
 const originalEnv = { ...process.env };
 
 vi.mock("@actions/core", () => ({
   getInput: vi.fn((name: string) => inputs.get(name) ?? ""),
-  warning: vi.fn()
+  warning: vi.fn(),
 }));
 
 afterEach(() => {
@@ -34,18 +34,20 @@ describe("readActionConfig", () => {
       backlogSpaces: [
         {
           space: "space-a",
-          projectKeys: ["APP", "WEB"]
+          projectKeys: ["APP", "WEB"],
         },
         {
           space: "space-b",
-          projectKeys: ["OPS"]
-        }
+          projectKeys: ["OPS"],
+        },
       ],
       reportDate: "2026-07-06",
       reportLanguage: "ja",
+      reportFormats: ["markdown"],
+      reportHtmlDir: ".gitppou/site",
       commitReport: true,
       slackNotify: false,
-      llmProvider: "template"
+      llmProvider: "template",
     });
   });
 
@@ -59,11 +61,17 @@ describe("readActionConfig", () => {
     process.env.GITHUB_TOKEN = "github-token";
 
     const fetchMock = vi.fn(async () => {
-      return new Response(JSON.stringify({ created_at: "2026-07-07T15:30:00Z" }), { status: 200 });
+      return new Response(
+        JSON.stringify({ created_at: "2026-07-07T15:30:00Z" }),
+        { status: 200 },
+      );
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    const config = await readActionConfig(process.env, new Date("2026-07-09T00:00:00Z"));
+    const config = await readActionConfig(
+      process.env,
+      new Date("2026-07-09T00:00:00Z"),
+    );
 
     expect(config.reportDate).toBe("2026-07-08");
     expect(fetchMock).toHaveBeenCalledWith(
@@ -71,14 +79,17 @@ describe("readActionConfig", () => {
       expect.objectContaining({
         method: "GET",
         headers: expect.objectContaining({
-          Authorization: "Bearer github-token"
-        })
-      })
+          Authorization: "Bearer github-token",
+        }),
+      }),
     );
   });
 
   it("tries the repository owner token when the default token cannot read workflow runs", async () => {
-    inputs.set("config", "src/__tests__/fixtures/gitppou-without-date-owner-token.yml");
+    inputs.set(
+      "config",
+      "src/__tests__/fixtures/gitppou-without-date-owner-token.yml",
+    );
     process.env.GITHUB_ACTIONS = "true";
     process.env.GITHUB_RUN_ATTEMPT = "2";
     process.env.GITHUB_API_URL = "https://api.github.com";
@@ -90,10 +101,17 @@ describe("readActionConfig", () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(new Response("", { status: 403 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ created_at: "2026-07-07T15:30:00Z" }), { status: 200 }));
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ created_at: "2026-07-07T15:30:00Z" }), {
+          status: 200,
+        }),
+      );
     vi.stubGlobal("fetch", fetchMock);
 
-    const config = await readActionConfig(process.env, new Date("2026-07-09T00:00:00Z"));
+    const config = await readActionConfig(
+      process.env,
+      new Date("2026-07-09T00:00:00Z"),
+    );
 
     expect(config.reportDate).toBe("2026-07-08");
     expect(fetchMock).toHaveBeenNthCalledWith(
@@ -101,9 +119,9 @@ describe("readActionConfig", () => {
       "https://api.github.com/repos/owner/report-repo/actions/runs/123456",
       expect.objectContaining({
         headers: expect.objectContaining({
-          Authorization: "Bearer owner-token"
-        })
-      })
+          Authorization: "Bearer owner-token",
+        }),
+      }),
     );
   });
 
@@ -116,11 +134,15 @@ describe("readActionConfig", () => {
     process.env.GITHUB_RUN_ID = "123456";
     process.env.GITHUB_TOKEN = "github-token";
 
-    const fetchMock = vi.fn().mockResolvedValue(new Response("", { status: 403 }));
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response("", { status: 403 }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(readActionConfig(process.env, new Date("2026-07-09T00:00:00Z"))).rejects.toThrow(
-      "Refusing to use current runner time for a workflow rerun"
+    await expect(
+      readActionConfig(process.env, new Date("2026-07-09T00:00:00Z")),
+    ).rejects.toThrow(
+      "Refusing to use current runner time for a workflow rerun",
     );
   });
 
@@ -136,7 +158,10 @@ describe("readActionConfig", () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
-    const config = await readActionConfig(process.env, new Date("2026-07-09T00:00:00Z"));
+    const config = await readActionConfig(
+      process.env,
+      new Date("2026-07-09T00:00:00Z"),
+    );
 
     expect(config.reportDate).toBe("2026-07-06");
     expect(fetchMock).not.toHaveBeenCalled();
@@ -145,6 +170,8 @@ describe("readActionConfig", () => {
   it("reports missing config files clearly", async () => {
     inputs.set("config", "missing.yml");
 
-    await expect(readActionConfig()).rejects.toThrow("Config file not found: missing.yml");
+    await expect(readActionConfig()).rejects.toThrow(
+      "Config file not found: missing.yml",
+    );
   });
 });

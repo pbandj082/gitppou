@@ -109,4 +109,42 @@ describe("report evidence", () => {
       }
     ]);
   });
+
+  it("derives group titles from user actions instead of context-only activities", () => {
+    const groups: ActivityGroup[] = [
+      {
+        issueKey: "APP-1",
+        title: "comment context: Old context",
+        activities: [
+          {
+            source: "backlog",
+            kind: "comment_context",
+            issueKey: "APP-1",
+            title: "APP-1 comment context: Old context"
+          },
+          {
+            source: "backlog",
+            kind: "comment",
+            issueKey: "APP-1",
+            title: "APP-1 Actual issue title"
+          }
+        ]
+      }
+    ];
+
+    expect(filterGroupsByUserActions(groups)).toEqual([
+      {
+        issueKey: "APP-1",
+        title: "Actual issue title",
+        activities: [
+          {
+            source: "backlog",
+            kind: "comment",
+            issueKey: "APP-1",
+            title: "APP-1 Actual issue title"
+          }
+        ]
+      }
+    ]);
+  });
 });

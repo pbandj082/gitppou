@@ -405,6 +405,8 @@ function previousContextComments(comments: BacklogComment[], currentComment: Bac
   return comments
     .filter((comment) => comment.id !== currentComment.id)
     .filter((comment) => comment.content?.trim())
+    .filter((comment) => !isLowSignalContextComment(comment.content ?? ""))
+    .filter((comment) => !isSameBacklogUser(comment.createdUser, currentComment.createdUser))
     .filter((comment) => isBeforeOrSame(comment.created, currentComment.created))
     .slice(-COMMENT_CONTEXT_LIMIT);
 }
@@ -442,6 +444,34 @@ function formatContextComment(comment: BacklogComment): string {
   const author = comment.createdUser?.name ?? "Unknown";
   const created = comment.created ?? "unknown date";
   return `- ${created} ${author}: ${compactText(comment.content ?? "", COMMENT_CONTEXT_BODY_LIMIT)}`;
+}
+
+function isLowSignalContextComment(value: string): boolean {
+  const normalized = value
+    .replace(/^@[^\s　]+[\s　]*/u, "")
+    .replace(/\s+/g, " ")
+    .replace(/[!！。.\s]+$/gu, "")
+    .trim();
+
+  return /^(確認しました|確認済みです?|確認いたしました|確認完了|承知しました|了解しました|ok|okay|thanks|thank you|lgtm)$/iu.test(
+    normalized
+  );
+}
+
+function isSameBacklogUser(left: BacklogUser | undefined, right: BacklogUser | undefined): boolean {
+  if (left?.id !== undefined && right?.id !== undefined) {
+    return left.id === right.id;
+  }
+
+  if (!left?.name || !right?.name) {
+    return false;
+  }
+
+  return normalizeSpeakerName(left.name) === normalizeSpeakerName(right.name);
+}
+
+function normalizeSpeakerName(value: string): string {
+  return value.replace(/^@+/, "").replace(/\s+/g, "").trim();
 }
 
 function isBeforeOrSame(left: string | undefined, right: string | undefined): boolean {

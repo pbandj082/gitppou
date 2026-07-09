@@ -31,6 +31,10 @@ report:
   language: en
   timezone: Asia/Tokyo
   dir: reports
+  formats:
+    - markdown
+    # - html
+  # htmlDir: .gitppou/site
 
 llm:
   provider: template

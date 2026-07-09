@@ -12,12 +12,14 @@ const baseConfig: GitppouConfig = {
   reportTimezone: "Asia/Tokyo",
   reportLanguage: "ja",
   reportDir: "reports",
+  reportFormats: ["markdown"],
+  reportHtmlDir: ".gitppou/site",
   commitReport: false,
   slackNotify: false,
   llmProvider: "github-models",
   llmModel: "openai/gpt-4o-mini",
   llmMaxInputChars: 20_000,
-  llmStyle: "concise"
+  llmStyle: "concise",
 };
 
 afterEach(() => {
@@ -34,12 +36,13 @@ describe("refineWithGitHubModels", () => {
             {
               finish_reason: "length",
               message: {
-                content: "# 日報\n\n## 進捗\n\n```mermaid\ngantt\n  title truncated"
-              }
-            }
-          ]
-        })
-      )
+                content:
+                  "# 日報\n\n## 進捗\n\n```mermaid\ngantt\n  title truncated",
+              },
+            },
+          ],
+        }),
+      ),
     );
 
     await expect(
@@ -47,23 +50,24 @@ describe("refineWithGitHubModels", () => {
         config: baseConfig,
         templateDraft: "# 日報\n\n## 進捗\n\n- complete template",
         activities: [],
-        groups: []
-      })
+        groups: [],
+      }),
     ).rejects.toThrow("finish_reason=length");
   });
 
   it("requests enough output tokens for full report refinement", async () => {
-    const fetchMock = vi.fn(async (_input: string | URL | Request, _init?: RequestInit) =>
-      jsonResponse({
-        choices: [
-          {
-            finish_reason: "stop",
-            message: {
-              content: "# 日報\n\n- complete"
-            }
-          }
-        ]
-      })
+    const fetchMock = vi.fn(
+      async (_input: string | URL | Request, _init?: RequestInit) =>
+        jsonResponse({
+          choices: [
+            {
+              finish_reason: "stop",
+              message: {
+                content: "# 日報\n\n- complete",
+              },
+            },
+          ],
+        }),
     );
     vi.stubGlobal("fetch", fetchMock);
 
@@ -71,43 +75,46 @@ describe("refineWithGitHubModels", () => {
       config: baseConfig,
       templateDraft: "# 日報\n\n- template",
       activities: [],
-      groups: []
+      groups: [],
     });
 
-    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({
-      max_tokens: 4000
+    expect(
+      JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)),
+    ).toMatchObject({
+      max_tokens: 4000,
     });
   });
 
   it("truncates both template and evidence input before requesting GitHub Models", async () => {
-    const fetchMock = vi.fn(async (_input: string | URL | Request, _init?: RequestInit) =>
-      jsonResponse({
-        choices: [
-          {
-            finish_reason: "stop",
-            message: {
-              content: "# 日報\n\n- complete"
-            }
-          }
-        ]
-      })
+    const fetchMock = vi.fn(
+      async (_input: string | URL | Request, _init?: RequestInit) =>
+        jsonResponse({
+          choices: [
+            {
+              finish_reason: "stop",
+              message: {
+                content: "# 日報\n\n- complete",
+              },
+            },
+          ],
+        }),
     );
     vi.stubGlobal("fetch", fetchMock);
 
     await refineWithGitHubModels({
       config: {
         ...baseConfig,
-        llmMaxInputChars: 100
+        llmMaxInputChars: 100,
       },
       templateDraft: `# 日報\n\n${"T".repeat(200)}`,
       activities: [
         {
           source: "github",
           kind: "commit",
-          title: `APP-1 ${"E".repeat(200)}`
-        }
+          title: `APP-1 ${"E".repeat(200)}`,
+        },
       ],
-      groups: []
+      groups: [],
     });
 
     const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
@@ -127,12 +134,12 @@ describe("refineWithGitHubModels", () => {
             {
               finish_reason: "stop",
               message: {
-                content: "# 日報\n\n## 本日対応したこと\n\n### APP-1 Login"
-              }
-            }
-          ]
-        })
-      )
+                content: "# 日報\n\n## 本日対応したこと\n\n### APP-1 Login",
+              },
+            },
+          ],
+        }),
+      ),
     );
 
     await expect(
@@ -149,13 +156,15 @@ describe("refineWithGitHubModels", () => {
                 source: "github",
                 kind: "commit",
                 issueKey: "GAIATASK-1357",
-                title: "fix report generation"
-              }
-            ]
-          }
-        ]
-      })
-    ).rejects.toThrow("GitHub Models omitted required issue groups: GAIATASK-1357.");
+                title: "fix report generation",
+              },
+            ],
+          },
+        ],
+      }),
+    ).rejects.toThrow(
+      "GitHub Models omitted required issue groups: GAIATASK-1357.",
+    );
   });
 });
 
@@ -163,7 +172,7 @@ function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
     headers: {
-      "Content-Type": "application/json"
-    }
+      "Content-Type": "application/json",
+    },
   });
 }

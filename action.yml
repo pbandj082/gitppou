@@ -14,7 +14,11 @@ inputs:
 
 outputs:
   report-path:
-    description: "Generated report file path"
+    description: "Primary generated report file path"
+  report-paths:
+    description: "Generated report file paths, one per line"
+  report-html-path:
+    description: "Generated HTML report file path when HTML output is enabled"
   report-markdown:
     description: "Generated report markdown"
 

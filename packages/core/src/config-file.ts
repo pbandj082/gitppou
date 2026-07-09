@@ -8,7 +8,7 @@ import {
   parseLlmProvider,
   parseLlmStyle,
   parseReportLanguage,
-  resolveReportDate
+  resolveReportDate,
 } from "./config.js";
 import type {
   BacklogSpaceConfig,
@@ -16,7 +16,8 @@ import type {
   GitHubRepoOwnerSpec,
   GitHubRepoSort,
   GitHubRepoSpec,
-  GitppouConfig
+  ReportFormat,
+  GitppouConfig,
 } from "./types.js";
 
 const MAX_REPO_SELECTOR_LIMIT = 100;
@@ -42,7 +43,7 @@ export function buildGitppouConfig(
   rawConfig: unknown,
   options: ConfigBuildOptions,
   env: Env,
-  now = new Date()
+  now = new Date(),
 ): GitppouConfig {
   const root = asObject(rawConfig, "config");
   const github = getSection(root, "github");
@@ -55,40 +56,74 @@ export function buildGitppouConfig(
   const githubTokensByOwner = resolveGitHubTokensByOwner(github, env);
 
   const reportTimezone =
-    options.reportTimezone ?? getString(report, "timezone", "config.report.timezone") ?? DEFAULT_REPORT_TIMEZONE;
+    options.reportTimezone ??
+    getString(report, "timezone", "config.report.timezone") ??
+    DEFAULT_REPORT_TIMEZONE;
   const reportDate = resolveReportDate(
     options.reportDate ?? getString(report, "date", "config.report.date") ?? "",
     reportTimezone,
-    now
+    now,
   );
   const llmMaxInputChars = parsePositiveInteger(
     options.llmMaxInputChars ??
       getStringOrNumber(llm, "maxInputChars", "config.llm.maxInputChars") ??
       String(DEFAULT_LLM_MAX_INPUT_CHARS),
-    "llm-max-input-chars"
+    "llm-max-input-chars",
   );
-  const slackNotify = options.slackNotify ?? getOptionalBoolean(slack, "notify", "config.slack.notify") ?? true;
-  const backlogEnabled = getOptionalBoolean(backlog, "enabled", "config.backlog.enabled") ?? hasBacklogSection;
+  const slackNotify =
+    options.slackNotify ??
+    getOptionalBoolean(slack, "notify", "config.slack.notify") ??
+    true;
+  const backlogEnabled =
+    getOptionalBoolean(backlog, "enabled", "config.backlog.enabled") ??
+    hasBacklogSection;
 
   const config: GitppouConfig = {
-    githubToken: requiredEnv(env, getString(github, "tokenEnv", "config.github.tokenEnv") || "GITHUB_TOKEN"),
-    githubUsername: requiredString(github, "username", "config.github.username"),
+    githubToken: requiredEnv(
+      env,
+      getString(github, "tokenEnv", "config.github.tokenEnv") || "GITHUB_TOKEN",
+    ),
+    githubUsername: requiredString(
+      github,
+      "username",
+      "config.github.username",
+    ),
     githubRepos: getGitHubRepoSpecs(github, "repos", "config.github.repos"),
     backlogSpaces: backlogEnabled ? resolveBacklogSpaces(backlog) : [],
     reportDate,
     reportTimezone,
     reportLanguage: parseReportLanguage(
-      options.reportLanguage ?? getString(report, "language", "config.report.language") ?? DEFAULT_REPORT_LANGUAGE
+      options.reportLanguage ??
+        getString(report, "language", "config.report.language") ??
+        DEFAULT_REPORT_LANGUAGE,
     ),
-    reportDir: options.reportDir ?? getString(report, "dir", "config.report.dir") ?? "reports",
-    commitReport: options.commitReport ?? getOptionalBoolean(git, "commitReport", "config.git.commitReport") ?? false,
+    reportDir:
+      options.reportDir ??
+      getString(report, "dir", "config.report.dir") ??
+      "reports",
+    reportFormats: getReportFormats(report),
+    reportHtmlDir:
+      getString(report, "htmlDir", "config.report.htmlDir") ?? ".gitppou/site",
+    commitReport:
+      options.commitReport ??
+      getOptionalBoolean(git, "commitReport", "config.git.commitReport") ??
+      false,
     slackNotify,
     llmProvider: parseLlmProvider(
-      options.llmProvider ?? getString(llm, "provider", "config.llm.provider") ?? DEFAULT_LLM_PROVIDER
+      options.llmProvider ??
+        getString(llm, "provider", "config.llm.provider") ??
+        DEFAULT_LLM_PROVIDER,
     ),
-    llmModel: options.llmModel ?? getString(llm, "model", "config.llm.model") ?? DEFAULT_LLM_MODEL,
+    llmModel:
+      options.llmModel ??
+      getString(llm, "model", "config.llm.model") ??
+      DEFAULT_LLM_MODEL,
     llmMaxInputChars,
-    llmStyle: parseLlmStyle(options.llmStyle ?? getString(llm, "style", "config.llm.style") ?? DEFAULT_LLM_STYLE)
+    llmStyle: parseLlmStyle(
+      options.llmStyle ??
+        getString(llm, "style", "config.llm.style") ??
+        DEFAULT_LLM_STYLE,
+    ),
   };
 
   if (Object.keys(githubTokensByOwner).length > 0) {
@@ -100,7 +135,10 @@ export function buildGitppouConfig(
 
     const backlogUserId = getString(backlog, "userId", "config.backlog.userId");
     if (backlogUserId) {
-      config.backlogUserId = normalizeBacklogUserId(backlogUserId, "config.backlog.userId");
+      config.backlogUserId = normalizeBacklogUserId(
+        backlogUserId,
+        "config.backlog.userId",
+      );
     }
   }
 
@@ -121,6 +159,26 @@ export function buildGitppouConfig(
   return config;
 }
 
+function getReportFormats(report: RawObject): ReportFormat[] {
+  const formats = getStringArray(report, "formats", "config.report.formats");
+  if (formats.length === 0) {
+    return ["markdown"];
+  }
+
+  const parsed = formats.map((format) =>
+    parseReportFormat(format, "config.report.formats"),
+  );
+  return [...new Set(parsed)];
+}
+
+function parseReportFormat(value: string, pathLabel: string): ReportFormat {
+  if (value === "markdown" || value === "html") {
+    return value;
+  }
+
+  throw new Error(`${pathLabel} must contain only markdown or html.`);
+}
+
 function getSection(root: RawObject, key: string): RawObject {
   const value = root[key];
   if (value === undefined) {
@@ -130,7 +188,9 @@ function getSection(root: RawObject, key: string): RawObject {
   return asObject(value, `config.${key}`);
 }
 
-function resolveGitHubActionsContext(env: Env): GitHubActionsContext | undefined {
+function resolveGitHubActionsContext(
+  env: Env,
+): GitHubActionsContext | undefined {
   const context = compactObject({
     actor: env.GITHUB_ACTOR?.trim(),
     eventName: env.GITHUB_EVENT_NAME?.trim(),
@@ -139,7 +199,7 @@ function resolveGitHubActionsContext(env: Env): GitHubActionsContext | undefined
     runId: env.GITHUB_RUN_ID?.trim(),
     runNumber: env.GITHUB_RUN_NUMBER?.trim(),
     serverUrl: env.GITHUB_SERVER_URL?.trim(),
-    workflow: env.GITHUB_WORKFLOW?.trim()
+    workflow: env.GITHUB_WORKFLOW?.trim(),
   });
 
   return Object.keys(context).length > 0 ? context : undefined;
@@ -153,7 +213,11 @@ function asObject(value: unknown, pathLabel: string): RawObject {
   throw new Error(`${pathLabel} must be an object.`);
 }
 
-function requiredString(section: RawObject, key: string, pathLabel: string): string {
+function requiredString(
+  section: RawObject,
+  key: string,
+  pathLabel: string,
+): string {
   const value = getString(section, key, pathLabel);
   if (!value) {
     throw new Error(`${pathLabel} is required.`);
@@ -162,7 +226,11 @@ function requiredString(section: RawObject, key: string, pathLabel: string): str
   return value;
 }
 
-function getString(section: RawObject, key: string, pathLabel: string): string | undefined {
+function getString(
+  section: RawObject,
+  key: string,
+  pathLabel: string,
+): string | undefined {
   const value = section[key];
   if (value === undefined) {
     return undefined;
@@ -175,7 +243,11 @@ function getString(section: RawObject, key: string, pathLabel: string): string |
   return value.trim();
 }
 
-function getStringOrNumber(section: RawObject, key: string, pathLabel: string): string | undefined {
+function getStringOrNumber(
+  section: RawObject,
+  key: string,
+  pathLabel: string,
+): string | undefined {
   const value = section[key];
   if (value === undefined) {
     return undefined;
@@ -192,7 +264,11 @@ function getStringOrNumber(section: RawObject, key: string, pathLabel: string): 
   throw new Error(`${pathLabel} must be a string or number.`);
 }
 
-function getStringArray(section: RawObject, key: string, pathLabel: string): string[] {
+function getStringArray(
+  section: RawObject,
+  key: string,
+  pathLabel: string,
+): string[] {
   const value = section[key];
   if (value === undefined) {
     return [];
@@ -202,16 +278,22 @@ function getStringArray(section: RawObject, key: string, pathLabel: string): str
     throw new Error(`${pathLabel} must be an array of strings.`);
   }
 
-  return value.map((item, index) => {
-    if (typeof item !== "string") {
-      throw new Error(`${pathLabel}[${index}] must be a string.`);
-    }
+  return value
+    .map((item, index) => {
+      if (typeof item !== "string") {
+        throw new Error(`${pathLabel}[${index}] must be a string.`);
+      }
 
-    return item.trim();
-  }).filter(Boolean);
+      return item.trim();
+    })
+    .filter(Boolean);
 }
 
-function getGitHubRepoSpecs(section: RawObject, key: string, pathLabel: string): GitHubRepoSpec[] {
+function getGitHubRepoSpecs(
+  section: RawObject,
+  key: string,
+  pathLabel: string,
+): GitHubRepoSpec[] {
   const value = section[key];
   if (value === undefined) {
     return [];
@@ -221,10 +303,15 @@ function getGitHubRepoSpecs(section: RawObject, key: string, pathLabel: string):
     throw new Error(`${pathLabel} must be an array.`);
   }
 
-  return value.map((item, index) => parseGitHubRepoSpec(item, `${pathLabel}[${index}]`));
+  return value.map((item, index) =>
+    parseGitHubRepoSpec(item, `${pathLabel}[${index}]`),
+  );
 }
 
-function parseGitHubRepoSpec(value: unknown, pathLabel: string): GitHubRepoSpec {
+function parseGitHubRepoSpec(
+  value: unknown,
+  pathLabel: string,
+): GitHubRepoSpec {
   if (typeof value === "string") {
     return value.trim();
   }
@@ -250,12 +337,14 @@ function parseGitHubRepoSpec(value: unknown, pathLabel: string): GitHubRepoSpec 
     }
 
     return {
-      repo: requiredString(value, "repo", `${pathLabel}.repo`)
+      repo: requiredString(value, "repo", `${pathLabel}.repo`),
     };
   }
 
   if (!key.trim() || key.includes("/")) {
-    throw new Error(`${pathLabel} owner selector key must not be empty or contain "/".`);
+    throw new Error(
+      `${pathLabel} owner selector key must not be empty or contain "/".`,
+    );
   }
 
   return parseRepoOwnerSpec(key.trim(), specValue, `${pathLabel}.${key}`);
@@ -263,18 +352,34 @@ function parseGitHubRepoSpec(value: unknown, pathLabel: string): GitHubRepoSpec 
 
 function throwInvalidGitHubRepoSpec(pathLabel: string): never {
   throw new Error(
-    `${pathLabel} must be one of: "owner/repo", { repo: "owner/repo" }, or { owner: { limit: 20, sort: "pushed" } }. In YAML, indent selector options under the owner key.`
+    `${pathLabel} must be one of: "owner/repo", { repo: "owner/repo" }, or { owner: { limit: 20, sort: "pushed" } }. In YAML, indent selector options under the owner key.`,
   );
 }
 
-function parseRepoOwnerSpec(owner: string, value: unknown, pathLabel: string): GitHubRepoOwnerSpec {
+function parseRepoOwnerSpec(
+  owner: string,
+  value: unknown,
+  pathLabel: string,
+): GitHubRepoOwnerSpec {
   const selector = value == null ? {} : asObject(value, pathLabel);
-  const limit = getOptionalRepoSelectorLimit(selector, "limit", `${pathLabel}.limit`);
+  const limit = getOptionalRepoSelectorLimit(
+    selector,
+    "limit",
+    `${pathLabel}.limit`,
+  );
   const sort = getGitHubRepoSort(selector, "sort", `${pathLabel}.sort`);
-  const includeForks = getOptionalBoolean(selector, "includeForks", `${pathLabel}.includeForks`);
-  const includeArchived = getOptionalBoolean(selector, "includeArchived", `${pathLabel}.includeArchived`);
+  const includeForks = getOptionalBoolean(
+    selector,
+    "includeForks",
+    `${pathLabel}.includeForks`,
+  );
+  const includeArchived = getOptionalBoolean(
+    selector,
+    "includeArchived",
+    `${pathLabel}.includeArchived`,
+  );
   const spec: GitHubRepoOwnerSpec = {
-    owner
+    owner,
   };
 
   if (limit !== undefined) {
@@ -296,16 +401,26 @@ function parseRepoOwnerSpec(owner: string, value: unknown, pathLabel: string): G
   return spec;
 }
 
-function getOptionalRepoSelectorLimit(section: RawObject, key: string, pathLabel: string): number | undefined {
+function getOptionalRepoSelectorLimit(
+  section: RawObject,
+  key: string,
+  pathLabel: string,
+): number | undefined {
   const value = getOptionalPositiveInteger(section, key, pathLabel);
   if (value !== undefined && value > MAX_REPO_SELECTOR_LIMIT) {
-    throw new Error(`${pathLabel} must be less than or equal to ${MAX_REPO_SELECTOR_LIMIT}.`);
+    throw new Error(
+      `${pathLabel} must be less than or equal to ${MAX_REPO_SELECTOR_LIMIT}.`,
+    );
   }
 
   return value;
 }
 
-function getOptionalPositiveInteger(section: RawObject, key: string, pathLabel: string): number | undefined {
+function getOptionalPositiveInteger(
+  section: RawObject,
+  key: string,
+  pathLabel: string,
+): number | undefined {
   const value = section[key];
   if (value === undefined) {
     return undefined;
@@ -319,7 +434,11 @@ function getOptionalPositiveInteger(section: RawObject, key: string, pathLabel: 
   return parsed;
 }
 
-function getGitHubRepoSort(section: RawObject, key: string, pathLabel: string): GitHubRepoSort | undefined {
+function getGitHubRepoSort(
+  section: RawObject,
+  key: string,
+  pathLabel: string,
+): GitHubRepoSort | undefined {
   const value = getString(section, key, pathLabel);
   if (value === undefined) {
     return undefined;
@@ -329,10 +448,16 @@ function getGitHubRepoSort(section: RawObject, key: string, pathLabel: string): 
     return value as GitHubRepoSort;
   }
 
-  throw new Error(`${pathLabel} must be created, updated, pushed, or full_name.`);
+  throw new Error(
+    `${pathLabel} must be created, updated, pushed, or full_name.`,
+  );
 }
 
-function getOptionalBoolean(section: RawObject, key: string, pathLabel: string): boolean | undefined {
+function getOptionalBoolean(
+  section: RawObject,
+  key: string,
+  pathLabel: string,
+): boolean | undefined {
   const value = section[key];
   if (value === undefined) {
     return undefined;
@@ -346,8 +471,14 @@ function getOptionalBoolean(section: RawObject, key: string, pathLabel: string):
 }
 
 function resolveBacklogSpaces(backlog: RawObject): BacklogSpaceConfig[] {
-  if (backlog.space !== undefined || backlog.projectKeys !== undefined || backlog.apiKeyEnv !== undefined) {
-    throw new Error("config.backlog uses spaces only. Move space settings under config.backlog.spaces.");
+  if (
+    backlog.space !== undefined ||
+    backlog.projectKeys !== undefined ||
+    backlog.apiKeyEnv !== undefined
+  ) {
+    throw new Error(
+      "config.backlog uses spaces only. Move space settings under config.backlog.spaces.",
+    );
   }
 
   if (backlog.spaces === undefined) {
@@ -367,14 +498,24 @@ function parseBacklogSpaces(value: unknown): BacklogSpaceConfig[] {
   return entries.map(([space, spaceConfig]) => {
     const normalizedSpace = space.trim();
     if (!normalizedSpace || normalizedSpace.includes("/")) {
-      throw new Error("config.backlog.spaces keys must not be empty or contain \"/\".");
+      throw new Error(
+        'config.backlog.spaces keys must not be empty or contain "/".',
+      );
     }
 
-    return parseBacklogSpaceConfig(normalizedSpace, spaceConfig, `config.backlog.spaces.${space}`);
+    return parseBacklogSpaceConfig(
+      normalizedSpace,
+      spaceConfig,
+      `config.backlog.spaces.${space}`,
+    );
   });
 }
 
-function parseBacklogSpaceConfig(space: string, value: unknown, pathLabel: string): BacklogSpaceConfig {
+function parseBacklogSpaceConfig(
+  space: string,
+  value: unknown,
+  pathLabel: string,
+): BacklogSpaceConfig {
   const section = value == null ? {} : asObject(value, pathLabel);
   if (section.apiKeyEnv !== undefined || section.userId !== undefined) {
     throw new Error(`${pathLabel} supports host and projectKeys only.`);
@@ -382,7 +523,11 @@ function parseBacklogSpaceConfig(space: string, value: unknown, pathLabel: strin
 
   const config: BacklogSpaceConfig = {
     space,
-    projectKeys: getStringArray(section, "projectKeys", `${pathLabel}.projectKeys`)
+    projectKeys: getStringArray(
+      section,
+      "projectKeys",
+      `${pathLabel}.projectKeys`,
+    ),
   };
 
   const host = getString(section, "host", `${pathLabel}.host`);
@@ -394,9 +539,14 @@ function parseBacklogSpaceConfig(space: string, value: unknown, pathLabel: strin
 }
 
 function normalizeBacklogHost(value: string, pathLabel: string): string {
-  const normalized = value.replace(/^https?:\/\//, "").replace(/\/+$/, "").trim();
+  const normalized = value
+    .replace(/^https?:\/\//, "")
+    .replace(/\/+$/, "")
+    .trim();
   if (!normalized || normalized.includes("/") || normalized.includes("?")) {
-    throw new Error(`${pathLabel} must be a Backlog host such as your-space.backlog.com or your-space.backlog.jp.`);
+    throw new Error(
+      `${pathLabel} must be a Backlog host such as your-space.backlog.com or your-space.backlog.jp.`,
+    );
   }
 
   return normalized;
@@ -405,14 +555,18 @@ function normalizeBacklogHost(value: string, pathLabel: string): string {
 function normalizeBacklogUserId(value: string, pathLabel: string): string {
   if (!/^\d+$/.test(value)) {
     throw new Error(
-      `${pathLabel} must be the numeric Backlog user id, not a user handle or Nulab id. Omit it to use the API key owner from /users/myself.`
+      `${pathLabel} must be the numeric Backlog user id, not a user handle or Nulab id. Omit it to use the API key owner from /users/myself.`,
     );
   }
 
   return value;
 }
 
-function getStringRecord(section: RawObject, key: string, pathLabel: string): Record<string, string> {
+function getStringRecord(
+  section: RawObject,
+  key: string,
+  pathLabel: string,
+): Record<string, string> {
   const value = section[key];
   if (value === undefined) {
     return {};
@@ -435,21 +589,36 @@ function getStringRecord(section: RawObject, key: string, pathLabel: string): Re
       }
 
       return [normalizedKey, normalizedValue];
-    })
+    }),
   );
 }
 
-function resolveGitHubTokensByOwner(github: RawObject, env: Env): Record<string, string> {
-  const tokenEnvByOwner = getStringRecord(github, "tokens", "config.github.tokens");
+function resolveGitHubTokensByOwner(
+  github: RawObject,
+  env: Env,
+): Record<string, string> {
+  const tokenEnvByOwner = getStringRecord(
+    github,
+    "tokens",
+    "config.github.tokens",
+  );
 
   return Object.fromEntries(
-    Object.entries(tokenEnvByOwner).map(([owner, envName]) => [owner, requiredEnv(env, envName)])
+    Object.entries(tokenEnvByOwner).map(([owner, envName]) => [
+      owner,
+      requiredEnv(env, envName),
+    ]),
   );
 }
 
-function compactObject<T extends Record<string, string | undefined>>(value: T): Record<string, string> {
+function compactObject<T extends Record<string, string | undefined>>(
+  value: T,
+): Record<string, string> {
   return Object.fromEntries(
-    Object.entries(value).filter((entry): entry is [string, string] => typeof entry[1] === "string" && entry[1] !== "")
+    Object.entries(value).filter(
+      (entry): entry is [string, string] =>
+        typeof entry[1] === "string" && entry[1] !== "",
+    ),
   );
 }
 

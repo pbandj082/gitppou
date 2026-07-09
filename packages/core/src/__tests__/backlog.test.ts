@@ -11,19 +11,21 @@ const baseConfig: GitppouConfig = {
     {
       space: "example",
       host: "example.backlog.com",
-      projectKeys: ["APP"]
-    }
+      projectKeys: ["APP"],
+    },
   ],
   reportDate: "2026-07-06",
   reportTimezone: "Asia/Tokyo",
   reportLanguage: "en",
   reportDir: "reports",
+  reportFormats: ["markdown"],
+  reportHtmlDir: ".gitppou/site",
   commitReport: false,
   slackNotify: false,
   llmProvider: "template",
   llmModel: "openai/gpt-4o-mini",
   llmMaxInputChars: 20_000,
-  llmStyle: "concise"
+  llmStyle: "concise",
 };
 
 afterEach(() => {
@@ -36,7 +38,9 @@ describe("fetchBacklogActivities", () => {
     vi.stubGlobal("fetch", fetchMock);
     const { backlogApiKey: _backlogApiKey, ...config } = baseConfig;
 
-    await expect(fetchBacklogActivities({ ...config, backlogSpaces: [] })).resolves.toEqual([]);
+    await expect(
+      fetchBacklogActivities({ ...config, backlogSpaces: [] }),
+    ).resolves.toEqual([]);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -51,7 +55,7 @@ describe("fetchBacklogActivities", () => {
         if (url.pathname === "/api/v2/users/myself") {
           return jsonResponse({
             id: 123,
-            name: "Admin"
+            name: "Admin",
           });
         }
 
@@ -60,8 +64,8 @@ describe("fetchBacklogActivities", () => {
             {
               id: 456,
               projectKey: "APP",
-              name: "App"
-            }
+              name: "App",
+            },
           ]);
         }
 
@@ -70,20 +74,22 @@ describe("fetchBacklogActivities", () => {
         }
 
         return jsonResponse({}, 404);
-      })
+      }),
     );
 
     await expect(fetchBacklogActivities(baseConfig)).resolves.toEqual([]);
 
-    expect(urls.some((url) => url.pathname === "/api/v2/users/myself")).toBe(true);
+    expect(urls.some((url) => url.pathname === "/api/v2/users/myself")).toBe(
+      true,
+    );
     expect(
       urls.some(
         (url) =>
           url.pathname === "/api/v2/issues" &&
           url.searchParams.getAll("assigneeId[]").includes("123") &&
           url.searchParams.get("updatedSince") === "2026-07-06" &&
-          url.searchParams.get("updatedUntil") === "2026-07-06"
-      )
+          url.searchParams.get("updatedUntil") === "2026-07-06",
+      ),
     ).toBe(true);
   });
 
@@ -96,7 +102,7 @@ describe("fetchBacklogActivities", () => {
         if (url.pathname === "/api/v2/users/myself") {
           return jsonResponse({
             id: 123,
-            name: "Admin"
+            name: "Admin",
           });
         }
 
@@ -105,8 +111,8 @@ describe("fetchBacklogActivities", () => {
             {
               id: 456,
               projectKey: "APP",
-              name: "App"
-            }
+              name: "App",
+            },
           ]);
         }
 
@@ -118,7 +124,10 @@ describe("fetchBacklogActivities", () => {
           return jsonResponse([]);
         }
 
-        if (url.pathname === "/api/v2/issues" && url.searchParams.getAll("assigneeId[]").includes("123")) {
+        if (
+          url.pathname === "/api/v2/issues" &&
+          url.searchParams.getAll("assigneeId[]").includes("123")
+        ) {
           return jsonResponse([
             {
               id: 789,
@@ -130,13 +139,13 @@ describe("fetchBacklogActivities", () => {
               milestone: [
                 {
                   id: 5,
-                  name: "Sprint 1"
-                }
+                  name: "Sprint 1",
+                },
               ],
               assignee: {
                 id: 123,
-                name: "Admin"
-              }
+                name: "Admin",
+              },
             },
             {
               id: 790,
@@ -147,13 +156,13 @@ describe("fetchBacklogActivities", () => {
               dueDate: "2026-07-01",
               status: {
                 id: 4,
-                name: "完了"
+                name: "完了",
               },
               assignee: {
                 id: 123,
-                name: "Admin"
-              }
-            }
+                name: "Admin",
+              },
+            },
           ]);
         }
 
@@ -166,7 +175,7 @@ describe("fetchBacklogActivities", () => {
         }
 
         return jsonResponse({}, 404);
-      })
+      }),
     );
 
     const activities = await fetchBacklogActivities(baseConfig);
@@ -177,13 +186,19 @@ describe("fetchBacklogActivities", () => {
         metadata: {
           startDate: "2026-06-30",
           dueDate: "2026-07-01",
-          milestones: ["Sprint 1"]
-        }
-      }
+          milestones: ["Sprint 1"],
+        },
+      },
     ]);
-    expect(activities).not.toEqual(expect.arrayContaining([expect.objectContaining({ issueKey: "APP-2" })]));
-    expect(activities).not.toEqual(expect.arrayContaining([expect.objectContaining({ kind: "issue" })]));
-    expect(activities).not.toEqual(expect.arrayContaining([expect.objectContaining({ kind: "due_issue" })]));
+    expect(activities).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ issueKey: "APP-2" })]),
+    );
+    expect(activities).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ kind: "issue" })]),
+    );
+    expect(activities).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ kind: "due_issue" })]),
+    );
   });
 
   it("keeps issues updated on the report date and due today", async () => {
@@ -195,7 +210,7 @@ describe("fetchBacklogActivities", () => {
         if (url.pathname === "/api/v2/users/myself") {
           return jsonResponse({
             id: 123,
-            name: "Admin"
+            name: "Admin",
           });
         }
 
@@ -204,12 +219,15 @@ describe("fetchBacklogActivities", () => {
             {
               id: 456,
               projectKey: "APP",
-              name: "App"
-            }
+              name: "App",
+            },
           ]);
         }
 
-        if (url.pathname === "/api/v2/issues" && !url.searchParams.has("assigneeId[]")) {
+        if (
+          url.pathname === "/api/v2/issues" &&
+          !url.searchParams.has("assigneeId[]")
+        ) {
           return jsonResponse([
             {
               id: 789,
@@ -219,27 +237,27 @@ describe("fetchBacklogActivities", () => {
               dueDate: "2026-07-06",
               priority: {
                 id: 4,
-                name: "High"
+                name: "High",
               },
               issueType: {
                 id: 1,
-                name: "Task"
+                name: "Task",
               },
               category: [
                 {
                   id: 2,
-                  name: "Backend"
+                  name: "Backend",
                 },
                 {
                   id: 3,
-                  name: "Security"
-                }
+                  name: "Security",
+                },
               ],
               assignee: {
                 id: 123,
-                name: "Admin"
-              }
-            }
+                name: "Admin",
+              },
+            },
           ]);
         }
 
@@ -252,7 +270,7 @@ describe("fetchBacklogActivities", () => {
         }
 
         return jsonResponse({}, 404);
-      })
+      }),
     );
 
     const activities = await fetchBacklogActivities(baseConfig);
@@ -262,17 +280,17 @@ describe("fetchBacklogActivities", () => {
         issueKey: "APP-1",
         metadata: {
           issueType: "Task",
-          categories: ["Backend", "Security"]
-        }
+          categories: ["Backend", "Security"],
+        },
       },
       {
         kind: "due_issue",
         issueKey: "APP-1",
         metadata: {
           issueType: "Task",
-          categories: ["Backend", "Security"]
-        }
-      }
+          categories: ["Backend", "Security"],
+        },
+      },
     ]);
     for (const activity of activities) {
       expect(activity.metadata).not.toHaveProperty("priority");
@@ -290,7 +308,7 @@ describe("fetchBacklogActivities", () => {
         if (url.pathname === "/api/v2/users/myself") {
           return jsonResponse({
             id: 123,
-            name: "Admin"
+            name: "Admin",
           });
         }
 
@@ -299,8 +317,8 @@ describe("fetchBacklogActivities", () => {
             {
               id: 456,
               projectKey: "APP",
-              name: "App"
-            }
+              name: "App",
+            },
           ]);
         }
 
@@ -313,19 +331,19 @@ describe("fetchBacklogActivities", () => {
               updated: "2026-07-06T10:00:00+09:00",
               issueType: {
                 id: 1,
-                name: "Task"
+                name: "Task",
               },
               category: [
                 {
                   id: 2,
-                  name: "Backend"
-                }
+                  name: "Backend",
+                },
               ],
               assignee: {
                 id: 123,
-                name: "Admin"
-              }
-            }
+                name: "Admin",
+              },
+            },
           ]);
         }
 
@@ -336,21 +354,21 @@ describe("fetchBacklogActivities", () => {
               created: "2026-07-06T10:00:00+09:00",
               createdUser: {
                 id: 123,
-                name: "Admin"
+                name: "Admin",
               },
               changeLog: [
                 {
                   field: "status",
                   originalValue: "Open",
-                  newValue: "Done"
-                }
-              ]
-            }
+                  newValue: "Done",
+                },
+              ],
+            },
           ]);
         }
 
         return jsonResponse({}, 404);
-      })
+      }),
     );
 
     await expect(fetchBacklogActivities(baseConfig)).resolves.toMatchObject([
@@ -361,9 +379,9 @@ describe("fetchBacklogActivities", () => {
           issueType: "Task",
           categories: ["Backend"],
           originalValue: "Open",
-          newValue: "Done"
-        }
-      }
+          newValue: "Done",
+        },
+      },
     ]);
   });
 
@@ -376,7 +394,7 @@ describe("fetchBacklogActivities", () => {
         if (url.pathname === "/api/v2/users/myself") {
           return jsonResponse({
             id: 123,
-            name: "Admin"
+            name: "Admin",
           });
         }
 
@@ -385,12 +403,15 @@ describe("fetchBacklogActivities", () => {
             {
               id: 456,
               projectKey: "APP",
-              name: "App"
-            }
+              name: "App",
+            },
           ]);
         }
 
-        if (url.pathname === "/api/v2/issues" && !url.searchParams.has("assigneeId[]")) {
+        if (
+          url.pathname === "/api/v2/issues" &&
+          !url.searchParams.has("assigneeId[]")
+        ) {
           return jsonResponse([
             {
               id: 789,
@@ -400,9 +421,9 @@ describe("fetchBacklogActivities", () => {
               updated: "2026-07-06T10:00:00+09:00",
               assignee: {
                 id: 123,
-                name: "Admin"
-              }
-            }
+                name: "Admin",
+              },
+            },
           ]);
         }
 
@@ -418,8 +439,8 @@ describe("fetchBacklogActivities", () => {
               created: "2026-07-06T09:00:00+09:00",
               createdUser: {
                 id: 456,
-                name: "Reviewer"
-              }
+                name: "Reviewer",
+              },
             },
             {
               id: 901,
@@ -427,14 +448,14 @@ describe("fetchBacklogActivities", () => {
               created: "2026-07-06T10:00:00+09:00",
               createdUser: {
                 id: 123,
-                name: "Admin"
-              }
-            }
+                name: "Admin",
+              },
+            },
           ]);
         }
 
         return jsonResponse({}, 404);
-      })
+      }),
     );
 
     await expect(fetchBacklogActivities(baseConfig)).resolves.toMatchObject([
@@ -450,22 +471,121 @@ describe("fetchBacklogActivities", () => {
                 id: 900,
                 author: "Reviewer",
                 createdAt: "2026-07-06T09:00:00+09:00",
-                body: "ログイン後に二重遷移しないか確認をお願いします。"
-              }
-            ]
-          }
-        }
+                body: "ログイン後に二重遷移しないか確認をお願いします。",
+              },
+            ],
+          },
+        },
       },
       {
         kind: "comment_context",
         issueKey: "APP-1",
-        body: expect.stringContaining("ログイン後に二重遷移しないか確認をお願いします。"),
+        body: expect.stringContaining(
+          "ログイン後に二重遷移しないか確認をお願いします。",
+        ),
         metadata: {
           contextForCommentId: 901,
-          contextCommentIds: [900]
-        }
-      }
+          contextCommentIds: [900],
+        },
+      },
     ]);
+  });
+
+  it("does not create discussion context from low-signal confirmation comments only", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        const url = new URL(String(input));
+
+        if (url.pathname === "/api/v2/users/myself") {
+          return jsonResponse({
+            id: 123,
+            name: "Admin",
+          });
+        }
+
+        if (url.pathname === "/api/v2/projects") {
+          return jsonResponse([
+            {
+              id: 456,
+              projectKey: "APP",
+              name: "App",
+            },
+          ]);
+        }
+
+        if (
+          url.pathname === "/api/v2/issues" &&
+          !url.searchParams.has("assigneeId[]")
+        ) {
+          return jsonResponse([
+            {
+              id: 789,
+              issueKey: "APP-1",
+              summary: "Target issue",
+              updated: "2026-07-06T10:00:00+09:00",
+              assignee: {
+                id: 123,
+                name: "Admin",
+              },
+            },
+          ]);
+        }
+
+        if (url.pathname === "/api/v2/issues") {
+          return jsonResponse([]);
+        }
+
+        if (url.pathname === "/api/v2/issues/APP-1/comments") {
+          return jsonResponse([
+            {
+              id: 900,
+              content: "@Admin 確認しました！",
+              created: "2026-07-01T09:00:00+09:00",
+              createdUser: {
+                id: 456,
+                name: "Reviewer",
+              },
+            },
+            {
+              id: 901,
+              content: "@Reviewer 先に調査結果を共有しました。",
+              created: "2026-07-02T09:00:00+09:00",
+              createdUser: {
+                id: 123,
+                name: "Admin",
+              },
+            },
+            {
+              id: 902,
+              content: "実装を更新しました。ご確認お願いいたします。",
+              created: "2026-07-06T10:00:00+09:00",
+              createdUser: {
+                id: 123,
+                name: "Admin",
+              },
+            },
+          ]);
+        }
+
+        return jsonResponse({}, 404);
+      }),
+    );
+
+    const activities = await fetchBacklogActivities(baseConfig);
+
+    expect(activities).toEqual([
+      expect.objectContaining({
+        kind: "comment",
+        issueKey: "APP-1",
+        body: "実装を更新しました。ご確認お願いいたします。",
+      }),
+    ]);
+    expect(activities).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: "comment_context" }),
+      ]),
+    );
   });
 });
 
@@ -473,7 +593,7 @@ function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
     headers: {
-      "Content-Type": "application/json"
-    }
+      "Content-Type": "application/json",
+    },
   });
 }

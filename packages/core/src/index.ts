@@ -11,8 +11,9 @@ export type {
   LlmProviderName,
   LlmStyle,
   NormalizedActivity,
+  ReportFormat,
   ReportLanguage,
-  ReportResult
+  ReportResult,
 } from "./types.js";
 
 export {
@@ -31,12 +32,24 @@ export {
   parseLlmProvider,
   parseLlmStyle,
   parseReportLanguage,
-  resolveReportDate
+  resolveReportDate,
 } from "./config.js";
 export { buildGitppouConfig } from "./config-file.js";
 export type { ConfigBuildOptions, Env } from "./config-file.js";
 export { fetchBacklogActivities } from "./backlog.js";
-export { fetchGitHubActivities, parseGitHubRepoSpecString, resolveGitHubTokenForOwner } from "./github.js";
-export { extractIssueKeys, groupActivitiesByIssueKey, normalizeActivities } from "./normalize.js";
-export { buildReportPath, generateDailyReport } from "./report.js";
+export {
+  fetchGitHubActivities,
+  parseGitHubRepoSpecString,
+  resolveGitHubTokenForOwner,
+} from "./github.js";
+export {
+  extractIssueKeys,
+  groupActivitiesByIssueKey,
+  normalizeActivities,
+} from "./normalize.js";
+export {
+  buildReportHtmlPath,
+  buildReportPath,
+  generateDailyReport,
+} from "./report.js";
 export { generateSlackSummary, sendSlackNotification } from "./slack.js";

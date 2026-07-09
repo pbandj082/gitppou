@@ -49,10 +49,18 @@ export function filterUserActionActivities(activities: NormalizedActivity[]): No
 
 export function filterGroupsByUserActions(groups: ActivityGroup[]): ActivityGroup[] {
   return groups
-    .map((group) => ({
-      ...group,
-      activities: group.activities.filter(isUserActionActivity)
-    }))
+    .map((group) => {
+      const activities = group.activities.filter(isUserActionActivity);
+      const title = shouldReplaceGroupTitle(group.title)
+        ? deriveUserActionGroupTitle(group.issueKey, activities) ?? group.title
+        : group.title;
+
+      return {
+        ...group,
+        ...(title ? { title } : {}),
+        activities
+      };
+    })
     .filter((group) => group.activities.length > 0);
 }
 
@@ -107,4 +115,32 @@ function compactEvidence<T extends ReportEvidenceAction | ReportEvidenceContext>
       return true;
     })
   ) as T;
+}
+
+function deriveUserActionGroupTitle(issueKey: ActivityGroup["issueKey"], activities: NormalizedActivity[]): string | undefined {
+  if (issueKey === "Unlinked") {
+    return undefined;
+  }
+
+  for (const activity of activities) {
+    const title = stripLeadingIssueKey(activity.title, issueKey);
+    if (title) {
+      return title;
+    }
+  }
+
+  return undefined;
+}
+
+function shouldReplaceGroupTitle(title: string | undefined): boolean {
+  return typeof title === "string" && /^comment context:/i.test(title.trim());
+}
+
+function stripLeadingIssueKey(title: string, issueKey: string): string | undefined {
+  const stripped = title.replace(new RegExp(`^${escapeRegExp(issueKey)}[:：\\s-]*`), "").trim();
+  return stripped || undefined;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
