@@ -42287,8 +42287,19 @@ ${html}
   </main>
   <script type="module">
     import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
-    mermaid.initialize({ startOnLoad: false, securityLevel: "strict", theme: "default" });
+    const fontFamily = getComputedStyle(document.documentElement).getPropertyValue("--font-sans").trim();
+    await document.fonts?.ready;
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: "strict",
+      theme: "default",
+      fontFamily,
+      themeVariables: {
+        fontFamily
+      }
+    });
     await mermaid.run({ querySelector: ".mermaid" });
+    await document.fonts?.ready;
   </script>
 </body>
 </html>
@@ -42440,6 +42451,15 @@ pre code {
 .mermaid {
   background: #ffffff;
   border: 1px solid var(--border);
+  font-family: var(--font-sans) !important;
+}
+
+.mermaid svg,
+.mermaid text,
+.mermaid span,
+.mermaid foreignObject,
+.mermaid .label {
+  font-family: var(--font-sans) !important;
 }
 
 table {
