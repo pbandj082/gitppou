@@ -57,29 +57,81 @@ async function resolveWorkflowRunCreatedAt(rawConfig: unknown, env: Env, fallbac
     return fallbackNow;
   }
 
-  const tokenEnv = getConfiguredGitHubTokenEnv(rawConfig);
-  const token = env[tokenEnv]?.trim() || env.GITHUB_TOKEN?.trim();
-  if (!token) {
-    core.warning(
-      `Could not resolve original workflow run date because ${tokenEnv} is not set; using current runner time.`
+  const rerun = isWorkflowRerun(env);
+  const tokenCandidates = getWorkflowRunTokenCandidates(rawConfig, env, repository);
+  if (tokenCandidates.length === 0) {
+    return handleWorkflowRunDateFallback(
+      rerun,
+      fallbackNow,
+      "No GitHub token was available to read workflow run metadata."
     );
-    return fallbackNow;
   }
 
-  try {
-    return await fetchWorkflowRunCreatedAt({
-      apiUrl: env.GITHUB_API_URL?.trim() || "https://api.github.com",
-      repository,
-      runId,
-      token
-    });
-  } catch (error) {
-    core.warning(
-      `Could not resolve original workflow run date; using current runner time. ${formatError(error)} ` +
-        "Add permissions.actions: read if this runs in GitHub Actions."
-    );
-    return fallbackNow;
+  const errors: string[] = [];
+  for (const candidate of tokenCandidates) {
+    try {
+      return await fetchWorkflowRunCreatedAt({
+        apiUrl: env.GITHUB_API_URL?.trim() || "https://api.github.com",
+        repository,
+        runId,
+        token: candidate.token
+      });
+    } catch (error) {
+      errors.push(`${candidate.name}: ${formatError(error)}`);
+    }
   }
+
+  return handleWorkflowRunDateFallback(
+    rerun,
+    fallbackNow,
+    `Could not resolve original workflow run date. ${errors.join(" ")}`
+  );
+}
+
+function handleWorkflowRunDateFallback(rerun: boolean, fallbackNow: Date, reason: string): Date {
+  const permissionHint =
+    "Add permissions.actions: read, use a token with Actions read access, or set report.date explicitly.";
+
+  if (rerun) {
+    throw new Error(`${reason} Refusing to use current runner time for a workflow rerun. ${permissionHint}`);
+  }
+
+  core.warning(`${reason} Using current runner time. ${permissionHint}`);
+  return fallbackNow;
+}
+
+function isWorkflowRerun(env: Env): boolean {
+  const attempt = Number(env.GITHUB_RUN_ATTEMPT?.trim() || "1");
+  return Number.isFinite(attempt) && attempt > 1;
+}
+
+function getWorkflowRunTokenCandidates(
+  rawConfig: unknown,
+  env: Env,
+  repository: string
+): Array<{ name: string; token: string }> {
+  const owner = repository.split("/")[0] ?? "";
+  const tokenEnvNames = [
+    getConfiguredGitHubTokenEnv(rawConfig),
+    getConfiguredGitHubOwnerTokenEnv(rawConfig, owner),
+    "GITHUB_TOKEN"
+  ].filter((value): value is string => Boolean(value));
+
+  const seen = new Set<string>();
+  const candidates: Array<{ name: string; token: string }> = [];
+  for (const name of tokenEnvNames) {
+    if (seen.has(name)) {
+      continue;
+    }
+
+    seen.add(name);
+    const token = env[name]?.trim();
+    if (token) {
+      candidates.push({ name, token });
+    }
+  }
+
+  return candidates;
 }
 
 async function fetchWorkflowRunCreatedAt(options: {
@@ -136,6 +188,19 @@ function getConfiguredGitHubTokenEnv(rawConfig: unknown): string {
   }
 
   return rawConfig.github.tokenEnv.trim() || "GITHUB_TOKEN";
+}
+
+function getConfiguredGitHubOwnerTokenEnv(rawConfig: unknown, owner: string): string | undefined {
+  if (!owner || !isRecord(rawConfig) || !isRecord(rawConfig.github) || !isRecord(rawConfig.github.tokens)) {
+    return undefined;
+  }
+
+  const value = rawConfig.github.tokens[owner];
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  return value.trim() || undefined;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

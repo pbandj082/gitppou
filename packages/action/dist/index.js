@@ -36207,25 +36207,59 @@ async function resolveWorkflowRunCreatedAt(rawConfig, env, fallbackNow) {
     if (!repository || !runId) {
         return fallbackNow;
     }
-    const tokenEnv = getConfiguredGitHubTokenEnv(rawConfig);
-    const token = env[tokenEnv]?.trim() || env.GITHUB_TOKEN?.trim();
-    if (!token) {
-        _actions_core__WEBPACK_IMPORTED_MODULE_2__.warning(`Could not resolve original workflow run date because ${tokenEnv} is not set; using current runner time.`);
-        return fallbackNow;
+    const rerun = isWorkflowRerun(env);
+    const tokenCandidates = getWorkflowRunTokenCandidates(rawConfig, env, repository);
+    if (tokenCandidates.length === 0) {
+        return handleWorkflowRunDateFallback(rerun, fallbackNow, "No GitHub token was available to read workflow run metadata.");
     }
-    try {
-        return await fetchWorkflowRunCreatedAt({
-            apiUrl: env.GITHUB_API_URL?.trim() || "https://api.github.com",
-            repository,
-            runId,
-            token
-        });
+    const errors = [];
+    for (const candidate of tokenCandidates) {
+        try {
+            return await fetchWorkflowRunCreatedAt({
+                apiUrl: env.GITHUB_API_URL?.trim() || "https://api.github.com",
+                repository,
+                runId,
+                token: candidate.token
+            });
+        }
+        catch (error) {
+            errors.push(`${candidate.name}: ${formatError(error)}`);
+        }
     }
-    catch (error) {
-        _actions_core__WEBPACK_IMPORTED_MODULE_2__.warning(`Could not resolve original workflow run date; using current runner time. ${formatError(error)} ` +
-            "Add permissions.actions: read if this runs in GitHub Actions.");
-        return fallbackNow;
+    return handleWorkflowRunDateFallback(rerun, fallbackNow, `Could not resolve original workflow run date. ${errors.join(" ")}`);
+}
+function handleWorkflowRunDateFallback(rerun, fallbackNow, reason) {
+    const permissionHint = "Add permissions.actions: read, use a token with Actions read access, or set report.date explicitly.";
+    if (rerun) {
+        throw new Error(`${reason} Refusing to use current runner time for a workflow rerun. ${permissionHint}`);
     }
+    _actions_core__WEBPACK_IMPORTED_MODULE_2__.warning(`${reason} Using current runner time. ${permissionHint}`);
+    return fallbackNow;
+}
+function isWorkflowRerun(env) {
+    const attempt = Number(env.GITHUB_RUN_ATTEMPT?.trim() || "1");
+    return Number.isFinite(attempt) && attempt > 1;
+}
+function getWorkflowRunTokenCandidates(rawConfig, env, repository) {
+    const owner = repository.split("/")[0] ?? "";
+    const tokenEnvNames = [
+        getConfiguredGitHubTokenEnv(rawConfig),
+        getConfiguredGitHubOwnerTokenEnv(rawConfig, owner),
+        "GITHUB_TOKEN"
+    ].filter((value) => Boolean(value));
+    const seen = new Set();
+    const candidates = [];
+    for (const name of tokenEnvNames) {
+        if (seen.has(name)) {
+            continue;
+        }
+        seen.add(name);
+        const token = env[name]?.trim();
+        if (token) {
+            candidates.push({ name, token });
+        }
+    }
+    return candidates;
 }
 async function fetchWorkflowRunCreatedAt(options) {
     const [owner, repo] = options.repository.split("/");
@@ -36266,6 +36300,16 @@ function getConfiguredGitHubTokenEnv(rawConfig) {
     }
     return rawConfig.github.tokenEnv.trim() || "GITHUB_TOKEN";
 }
+function getConfiguredGitHubOwnerTokenEnv(rawConfig, owner) {
+    if (!owner || !isRecord(rawConfig) || !isRecord(rawConfig.github) || !isRecord(rawConfig.github.tokens)) {
+        return undefined;
+    }
+    const value = rawConfig.github.tokens[owner];
+    if (typeof value !== "string") {
+        return undefined;
+    }
+    return value.trim() || undefined;
+}
 function isRecord(value) {
     return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -36277,10 +36321,14 @@ function isRecord(value) {
 /***/ ((__unused_webpack___webpack_module__, __webpack_exports__, __nccwpck_require__) => {
 
 /* harmony export */ __nccwpck_require__.d(__webpack_exports__, {
+/* harmony export */   I: () => (/* binding */ syncReportBranchBeforeWrite),
 /* harmony export */   O: () => (/* binding */ commitReportIfNeeded)
 /* harmony export */ });
 /* harmony import */ var _actions_exec__WEBPACK_IMPORTED_MODULE_0__ = __nccwpck_require__(7167);
 
+async function syncReportBranchBeforeWrite() {
+    await git(["pull", "--ff-only"]);
+}
 async function commitReportIfNeeded({ reportPath, reportDate }) {
     await git(["config", "user.name", "gitppou[bot]"]);
     await git(["config", "user.email", "gitppou[bot]@users.noreply.github.com"]);
@@ -36340,6 +36388,9 @@ __nccwpck_require__.a(__webpack_module__, async (__webpack_handle_async_dependen
 async function main() {
     try {
         const config = await (0,_config_js__WEBPACK_IMPORTED_MODULE_2__/* .readActionConfig */ .P)();
+        if (config.commitReport) {
+            await (0,_git_js__WEBPACK_IMPORTED_MODULE_3__/* .syncReportBranchBeforeWrite */ .I)();
+        }
         const sendSlackAfterCommit = config.commitReport && config.slackNotify;
         const result = await (0,_gitppou_core__WEBPACK_IMPORTED_MODULE_1__/* .generateDailyReport */ .jl)(sendSlackAfterCommit
             ? {

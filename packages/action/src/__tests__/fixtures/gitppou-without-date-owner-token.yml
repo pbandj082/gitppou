@@ -1,0 +1,20 @@
+github:
+  username: octocat
+  tokens:
+    owner: OWNER_TOKEN
+  repos:
+    - owner/repo
+
+backlog:
+  enabled: false
+
+report:
+  language: ja
+  timezone: Asia/Tokyo
+  dir: reports
+
+llm:
+  provider: template
+
+slack:
+  notify: false

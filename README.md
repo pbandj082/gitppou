@@ -120,7 +120,7 @@ permissions:
   models: read
 ```
 
-`actions: read` lets Gitppou resolve the original workflow run creation time. If `report.date` is omitted, rerunning a failed workflow still generates the report for the original run date instead of the rerun date. Set `report.date` explicitly when you want to override this behavior.
+`actions: read` lets Gitppou resolve the original workflow run creation time. If `report.date` is omitted, rerunning a failed workflow still generates the report for the original run date instead of the rerun date. On reruns, Gitppou refuses to fall back to the current runner time when the original run date cannot be resolved. Set `report.date` explicitly when you want to override this behavior.
 
 If you need to scan private repositories outside the workflow repository, use a fine-grained personal access token with the minimum required permissions:
 

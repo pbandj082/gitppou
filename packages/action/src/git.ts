@@ -5,6 +5,10 @@ type CommitReportOptions = {
   reportDate: string;
 };
 
+export async function syncReportBranchBeforeWrite(): Promise<void> {
+  await git(["pull", "--ff-only"]);
+}
+
 export async function commitReportIfNeeded({ reportPath, reportDate }: CommitReportOptions): Promise<void> {
   await git(["config", "user.name", "gitppou[bot]"]);
   await git(["config", "user.email", "gitppou[bot]@users.noreply.github.com"]);
