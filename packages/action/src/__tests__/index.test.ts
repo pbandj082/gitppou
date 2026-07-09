@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   commitReportIfNeeded: vi.fn(),
   generateDailyReport: vi.fn(),
+  publishBacklogDocument: vi.fn(),
   readActionConfig: vi.fn(),
   sendSlackNotification: vi.fn(),
   setFailed: vi.fn(),
@@ -20,6 +21,7 @@ vi.mock("@actions/core", () => ({
 
 vi.mock("@gitppou/core", () => ({
   generateDailyReport: mocks.generateDailyReport,
+  publishBacklogDocument: mocks.publishBacklogDocument,
   sendSlackNotification: mocks.sendSlackNotification,
 }));
 
@@ -69,6 +71,7 @@ beforeEach(() => {
   vi.resetModules();
   mocks.commitReportIfNeeded.mockReset();
   mocks.generateDailyReport.mockReset();
+  mocks.publishBacklogDocument.mockReset();
   mocks.readActionConfig.mockReset();
   mocks.sendSlackNotification.mockReset();
   mocks.setFailed.mockReset();
@@ -114,6 +117,46 @@ describe("action entrypoint", () => {
     expect(mocks.setOutput).toHaveBeenCalledWith(
       "report-pdf-path",
       ".gitppou/pdf/2026-07/2026-07-08.pdf",
+    );
+  });
+
+  it("publishes Backlog documents after committing reports", async () => {
+    const config: GitppouConfig = {
+      ...baseConfig,
+      backlogApiKey: "backlog-key",
+      backlogDocument: {
+        space: "example",
+        projectId: 456,
+      },
+    };
+    mocks.readActionConfig.mockResolvedValue(config);
+    mocks.generateDailyReport.mockResolvedValue(reportResult);
+    mocks.publishBacklogDocument.mockResolvedValue({
+      id: "document-id",
+      projectId: 456,
+      title: "Daily Report 2026-07-08",
+    });
+
+    await import("../index.js");
+
+    expect(mocks.generateDailyReport).toHaveBeenCalledWith({
+      ...config,
+      deferBacklogDocumentPublish: true,
+    });
+    const commitOrder = mocks.commitReportIfNeeded.mock.invocationCallOrder[0];
+    const publishOrder =
+      mocks.publishBacklogDocument.mock.invocationCallOrder[0];
+    expect(commitOrder).toBeDefined();
+    expect(publishOrder).toBeDefined();
+    expect(commitOrder ?? 0).toBeLessThan(publishOrder ?? 0);
+    expect(mocks.publishBacklogDocument).toHaveBeenCalledWith(config, "# 日報");
+    expect(mocks.setOutput).toHaveBeenCalledWith(
+      "backlog-document-id",
+      "document-id",
+    );
+    expect(mocks.setOutput).toHaveBeenCalledWith(
+      "backlog-document-title",
+      "Daily Report 2026-07-08",
     );
   });
 });

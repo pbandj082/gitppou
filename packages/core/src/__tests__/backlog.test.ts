@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fetchBacklogActivities } from "../backlog.js";
+import { fetchBacklogActivities, publishBacklogDocument } from "../backlog.js";
 import type { GitppouConfig } from "../types.js";
 
 const baseConfig: GitppouConfig = {
@@ -587,6 +587,88 @@ describe("fetchBacklogActivities", () => {
         expect.objectContaining({ kind: "comment_context" }),
       ]),
     );
+  });
+});
+
+describe("publishBacklogDocument", () => {
+  it("creates a Backlog document from report markdown", async () => {
+    const requests: Array<{ url: URL; init?: RequestInit }> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        const url = new URL(String(input));
+        requests.push({ url, ...(init ? { init } : {}) });
+
+        if (url.pathname === "/api/v2/projects") {
+          return jsonResponse([
+            {
+              id: 456,
+              projectKey: "APP",
+              name: "App",
+            },
+          ]);
+        }
+
+        if (url.pathname === "/api/v2/documents") {
+          return jsonResponse({
+            id: "document-id",
+            projectId: 456,
+            title: "日報 2026-07-06",
+          });
+        }
+
+        return jsonResponse({}, 404);
+      }),
+    );
+
+    await expect(
+      publishBacklogDocument(
+        {
+          ...baseConfig,
+          reportLanguage: "ja",
+          backlogDocument: {
+            space: "example",
+            host: "example.backlog.com",
+            projectKey: "APP",
+            parentId: "parent-id",
+            title: "日報 {{date}}",
+            addLast: true,
+          },
+        },
+        "# 日報\n\n本文",
+      ),
+    ).resolves.toEqual({
+      id: "document-id",
+      projectId: 456,
+      title: "日報 2026-07-06",
+    });
+
+    const postRequest = requests.find(
+      (request) => request.url.pathname === "/api/v2/documents",
+    );
+    expect(postRequest?.url.searchParams.get("apiKey")).toBe("backlog-key");
+    expect(postRequest?.init?.method).toBe("POST");
+    expect(postRequest?.init?.headers).toMatchObject({
+      "Content-Type": "application/x-www-form-urlencoded",
+    });
+    const body = postRequest?.init?.body;
+    expect(body).toBeInstanceOf(URLSearchParams);
+    const params = body as URLSearchParams;
+    expect(params.get("projectId")).toBe("456");
+    expect(params.get("title")).toBe("日報 2026-07-06");
+    expect(params.get("content")).toBe("# 日報\n\n本文");
+    expect(params.get("parentId")).toBe("parent-id");
+    expect(params.get("addLast")).toBe("true");
+  });
+
+  it("returns undefined when Backlog document publishing is not configured", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      publishBacklogDocument(baseConfig, "# Daily Report"),
+    ).resolves.toBeUndefined();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 

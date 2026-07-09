@@ -1,12 +1,30 @@
 import { isOnReportDate } from "./config.js";
-import type { BacklogSpaceConfig, GitppouConfig, NormalizedActivity } from "./types.js";
+import type {
+  BacklogDocumentConfig,
+  BacklogDocumentResult,
+  BacklogSpaceConfig,
+  GitppouConfig,
+  NormalizedActivity,
+} from "./types.js";
 
-type BacklogSpaceContext = BacklogSpaceConfig & {
+type BacklogRequestContext = {
+  space: string;
+  host?: string;
   backlogApiKey: string;
-  backlogUserId?: string;
-  reportDate: string;
-  reportTimezone: string;
 };
+
+type BacklogSpaceContext = BacklogSpaceConfig &
+  BacklogRequestContext & {
+    backlogUserId?: string;
+    reportDate: string;
+    reportTimezone: string;
+  };
+
+type BacklogDocumentContext = BacklogDocumentConfig &
+  BacklogRequestContext & {
+    reportDate: string;
+    reportLanguage: GitppouConfig["reportLanguage"];
+  };
 
 type BacklogUser = {
   id: number;
@@ -17,6 +35,12 @@ type BacklogProject = {
   id: number;
   projectKey: string;
   name: string;
+};
+
+type BacklogDocumentResponse = {
+  id: string;
+  projectId: number;
+  title: string;
 };
 
 type BacklogNamedValue = {
@@ -59,12 +83,15 @@ type BacklogComment = {
   }>;
 };
 
-type QueryValue = string | number | boolean | readonly (string | number | boolean)[];
+type QueryValue =
+  string | number | boolean | readonly (string | number | boolean)[];
 const ASSIGNED_PROGRESS_FETCH_LIMIT = 50;
 const COMMENT_CONTEXT_LIMIT = 8;
 const COMMENT_CONTEXT_BODY_LIMIT = 300;
 
-export async function fetchBacklogActivities(config: GitppouConfig): Promise<NormalizedActivity[]> {
+export async function fetchBacklogActivities(
+  config: GitppouConfig,
+): Promise<NormalizedActivity[]> {
   if (config.backlogSpaces.length === 0) {
     return [];
   }
@@ -79,45 +106,139 @@ export async function fetchBacklogActivities(config: GitppouConfig): Promise<Nor
       fetchBacklogSpaceActivities({
         ...spaceConfig,
         backlogApiKey,
-        ...(config.backlogUserId ? { backlogUserId: config.backlogUserId } : {}),
+        ...(config.backlogUserId
+          ? { backlogUserId: config.backlogUserId }
+          : {}),
         reportDate: config.reportDate,
-        reportTimezone: config.reportTimezone
-      })
-    )
+        reportTimezone: config.reportTimezone,
+      }),
+    ),
   );
 
   return activitySets.flat();
 }
 
-async function fetchBacklogSpaceActivities(config: BacklogSpaceContext): Promise<NormalizedActivity[]> {
+export async function publishBacklogDocument(
+  config: GitppouConfig,
+  reportMarkdown: string,
+): Promise<BacklogDocumentResult | undefined> {
+  if (!config.backlogDocument) {
+    return undefined;
+  }
+
+  if (!config.backlogApiKey) {
+    throw new Error(
+      "BACKLOG_API_KEY is required when Backlog document publishing is enabled.",
+    );
+  }
+
+  const documentConfig: BacklogDocumentContext = {
+    ...config.backlogDocument,
+    backlogApiKey: config.backlogApiKey,
+    reportDate: config.reportDate,
+    reportLanguage: config.reportLanguage,
+  };
+  const projectId =
+    documentConfig.projectId ??
+    (await resolveDocumentProjectId(documentConfig));
+  const title = documentTitle(documentConfig);
+  const response = await backlogPostForm<BacklogDocumentResponse>(
+    documentConfig,
+    "/documents",
+    {
+      projectId,
+      title,
+      content: reportMarkdown,
+      ...(documentConfig.parentId ? { parentId: documentConfig.parentId } : {}),
+      ...(documentConfig.emoji ? { emoji: documentConfig.emoji } : {}),
+      ...(documentConfig.addLast !== undefined
+        ? { addLast: documentConfig.addLast }
+        : {}),
+    },
+  );
+
+  return {
+    id: response.id,
+    projectId: response.projectId,
+    title: response.title,
+  };
+}
+
+async function resolveDocumentProjectId(
+  config: BacklogDocumentContext,
+): Promise<number> {
+  if (!config.projectKey) {
+    throw new Error(
+      "backlog.document.projectKey is required when projectId is omitted.",
+    );
+  }
+
+  const projects = await backlogGet<BacklogProject[]>(config, "/projects", {});
+  const project = projects.find(
+    (candidate) =>
+      candidate.projectKey.toUpperCase() === config.projectKey?.toUpperCase(),
+  );
+  if (!project) {
+    throw new Error(
+      `Backlog project key not found in ${config.space}: ${config.projectKey}`,
+    );
+  }
+
+  return project.id;
+}
+
+function documentTitle(config: BacklogDocumentContext): string {
+  const fallback =
+    config.reportLanguage === "ja"
+      ? `日報 ${config.reportDate}`
+      : `Daily Report ${config.reportDate}`;
+  return (config.title || fallback).replace(
+    /\{\{\s*date\s*\}\}/g,
+    config.reportDate,
+  );
+}
+
+async function fetchBacklogSpaceActivities(
+  config: BacklogSpaceContext,
+): Promise<NormalizedActivity[]> {
   const resolvedConfig = await resolveBacklogUserId(config);
   const projectIds = await resolveProjectIds(resolvedConfig);
   const activityIssues = await fetchRelevantIssues(resolvedConfig, projectIds);
-  const assignedProgressIssues = await fetchAssignedProgressIssues(resolvedConfig, projectIds);
+  const assignedProgressIssues = await fetchAssignedProgressIssues(
+    resolvedConfig,
+    projectIds,
+  );
   const commentLists = await Promise.all(
-    activityIssues.map((issue) => fetchIssueComments(resolvedConfig, issue.issueKey))
+    activityIssues.map((issue) =>
+      fetchIssueComments(resolvedConfig, issue.issueKey),
+    ),
   );
 
   const activityItems = activityIssues.flatMap((issue, index) => {
     const comments = commentLists[index] ?? [];
-    const commentActivities = commentsToActivities(resolvedConfig, issue, comments);
+    const commentActivities = commentsToActivities(
+      resolvedConfig,
+      issue,
+      comments,
+    );
     const issueActivities = issueToActivities(resolvedConfig, issue).filter(
-      (activity) => activity.kind !== "issue" || commentActivities.length === 0
+      (activity) => activity.kind !== "issue" || commentActivities.length === 0,
     );
 
-    return [
-      ...issueActivities,
-      ...commentActivities
-    ];
+    return [...issueActivities, ...commentActivities];
   });
 
   return [
     ...activityItems,
-    ...assignedProgressIssues.flatMap((issue) => issueToAssignedProgressActivity(resolvedConfig, issue))
+    ...assignedProgressIssues.flatMap((issue) =>
+      issueToAssignedProgressActivity(resolvedConfig, issue),
+    ),
   ];
 }
 
-async function resolveBacklogUserId(config: BacklogSpaceContext): Promise<BacklogSpaceContext> {
+async function resolveBacklogUserId(
+  config: BacklogSpaceContext,
+): Promise<BacklogSpaceContext> {
   if (config.backlogUserId) {
     return config;
   }
@@ -125,11 +246,13 @@ async function resolveBacklogUserId(config: BacklogSpaceContext): Promise<Backlo
   const user = await backlogGet<BacklogUser>(config, "/users/myself", {});
   return {
     ...config,
-    backlogUserId: String(user.id)
+    backlogUserId: String(user.id),
   };
 }
 
-async function resolveProjectIds(config: BacklogSpaceContext): Promise<number[]> {
+async function resolveProjectIds(
+  config: BacklogSpaceContext,
+): Promise<number[]> {
   if (config.projectKeys.length === 0) {
     return [];
   }
@@ -141,21 +264,27 @@ async function resolveProjectIds(config: BacklogSpaceContext): Promise<number[]>
     .map((project) => project.id);
 
   const missing = [...wanted].filter(
-    (key) => !projects.some((project) => project.projectKey.toUpperCase() === key)
+    (key) =>
+      !projects.some((project) => project.projectKey.toUpperCase() === key),
   );
 
   if (missing.length > 0) {
-    throw new Error(`Backlog project key not found in ${config.space}: ${missing.join(", ")}`);
+    throw new Error(
+      `Backlog project key not found in ${config.space}: ${missing.join(", ")}`,
+    );
   }
 
   return projectIds;
 }
 
-async function fetchRelevantIssues(config: BacklogSpaceContext, projectIds: number[]): Promise<BacklogIssue[]> {
+async function fetchRelevantIssues(
+  config: BacklogSpaceContext,
+  projectIds: number[],
+): Promise<BacklogIssue[]> {
   const commonParams: Record<string, QueryValue> = {
     count: 100,
     sort: "updated",
-    order: "desc"
+    order: "desc",
   };
 
   if (projectIds.length > 0) {
@@ -165,7 +294,7 @@ async function fetchRelevantIssues(config: BacklogSpaceContext, projectIds: numb
   const updatedIssues = await backlogGet<BacklogIssue[]>(config, "/issues", {
     ...commonParams,
     updatedSince: config.reportDate,
-    updatedUntil: config.reportDate
+    updatedUntil: config.reportDate,
   });
 
   const assignedIssues = config.backlogUserId
@@ -173,7 +302,7 @@ async function fetchRelevantIssues(config: BacklogSpaceContext, projectIds: numb
         ...commonParams,
         "assigneeId[]": [config.backlogUserId],
         updatedSince: config.reportDate,
-        updatedUntil: config.reportDate
+        updatedUntil: config.reportDate,
       })
     : [];
 
@@ -187,7 +316,7 @@ async function fetchRelevantIssues(config: BacklogSpaceContext, projectIds: numb
 
 async function fetchAssignedProgressIssues(
   config: BacklogSpaceContext,
-  projectIds: number[]
+  projectIds: number[],
 ): Promise<BacklogIssue[]> {
   if (!config.backlogUserId) {
     return [];
@@ -197,7 +326,7 @@ async function fetchAssignedProgressIssues(
     count: ASSIGNED_PROGRESS_FETCH_LIMIT,
     sort: "updated",
     order: "desc",
-    "assigneeId[]": [config.backlogUserId]
+    "assigneeId[]": [config.backlogUserId],
   };
 
   if (projectIds.length > 0) {
@@ -207,14 +336,24 @@ async function fetchAssignedProgressIssues(
   return backlogGet<BacklogIssue[]>(config, "/issues", params);
 }
 
-async function fetchIssueComments(config: BacklogSpaceContext, issueKey: string): Promise<BacklogComment[]> {
-  return backlogGet<BacklogComment[]>(config, `/issues/${encodeURIComponent(issueKey)}/comments`, {
-    count: 100,
-    order: "asc"
-  });
+async function fetchIssueComments(
+  config: BacklogSpaceContext,
+  issueKey: string,
+): Promise<BacklogComment[]> {
+  return backlogGet<BacklogComment[]>(
+    config,
+    `/issues/${encodeURIComponent(issueKey)}/comments`,
+    {
+      count: 100,
+      order: "asc",
+    },
+  );
 }
 
-function issueToActivities(config: BacklogSpaceContext, issue: BacklogIssue): NormalizedActivity[] {
+function issueToActivities(
+  config: BacklogSpaceContext,
+  issue: BacklogIssue,
+): NormalizedActivity[] {
   const activities: NormalizedActivity[] = [];
   const projectKey = getProjectKey(issue.issueKey);
   const metadata = issueMetadata(config, issue);
@@ -230,7 +369,7 @@ function issueToActivities(config: BacklogSpaceContext, issue: BacklogIssue): No
       url: buildIssueUrl(config, issue.issueKey),
       ...(issue.created ? { createdAt: issue.created } : {}),
       ...(issue.updated ? { updatedAt: issue.updated } : {}),
-      metadata
+      metadata,
     });
   }
 
@@ -243,7 +382,7 @@ function issueToActivities(config: BacklogSpaceContext, issue: BacklogIssue): No
       title: `${issue.issueKey} due: ${issue.summary}`,
       url: buildIssueUrl(config, issue.issueKey),
       ...(issue.updated ? { updatedAt: issue.updated } : {}),
-      metadata
+      metadata,
     });
   }
 
@@ -252,7 +391,7 @@ function issueToActivities(config: BacklogSpaceContext, issue: BacklogIssue): No
 
 function issueToAssignedProgressActivity(
   config: BacklogSpaceContext,
-  issue: BacklogIssue
+  issue: BacklogIssue,
 ): NormalizedActivity[] {
   if (!isAssignedToUser(config, issue)) {
     return [];
@@ -281,26 +420,31 @@ function issueToAssignedProgressActivity(
       metadata: compactMetadata({
         ...issueMetadata(config, issue),
         ...(startDate ? { startDate } : {}),
-        ...(dueDate ? { dueDate } : {})
-      })
-    }
+        ...(dueDate ? { dueDate } : {}),
+      }),
+    },
   ];
 }
 
 function commentsToActivities(
   config: BacklogSpaceContext,
   issue: BacklogIssue,
-  comments: BacklogComment[]
+  comments: BacklogComment[],
 ): NormalizedActivity[] {
   const activities: NormalizedActivity[] = [];
   const projectKey = getProjectKey(issue.issueKey);
 
   for (const comment of comments) {
-    if (!isOnReportDate(comment.created, config.reportDate, config.reportTimezone)) {
+    if (
+      !isOnReportDate(comment.created, config.reportDate, config.reportTimezone)
+    ) {
       continue;
     }
 
-    if (config.backlogUserId && String(comment.createdUser?.id) !== config.backlogUserId) {
+    if (
+      config.backlogUserId &&
+      String(comment.createdUser?.id) !== config.backlogUserId
+    ) {
       continue;
     }
 
@@ -310,11 +454,11 @@ function commentsToActivities(
     const baseMetadata = compactMetadata({
       ...issueMetadata(config, issue),
       backlogCommentId: comment.id,
-      author: comment.createdUser?.name
+      author: comment.createdUser?.name,
     });
     const metadata = compactMetadata({
       ...baseMetadata,
-      ...(commentContext ? { commentContext } : {})
+      ...(commentContext ? { commentContext } : {}),
     });
 
     if (comment.content?.trim()) {
@@ -328,10 +472,16 @@ function commentsToActivities(
         url,
         ...(comment.created ? { createdAt: comment.created } : {}),
         ...(comment.updated ? { updatedAt: comment.updated } : {}),
-        metadata
+        metadata,
       });
 
-      const contextActivity = commentContextActivity(config, issue, previousComments, comment, baseMetadata);
+      const contextActivity = commentContextActivity(
+        config,
+        issue,
+        previousComments,
+        comment,
+        baseMetadata,
+      );
       if (contextActivity) {
         activities.push(contextActivity);
       }
@@ -356,8 +506,8 @@ function commentsToActivities(
           field: change.field,
           status: change.newValue,
           originalValue: change.originalValue,
-          newValue: change.newValue
-        })
+          newValue: change.newValue,
+        }),
       });
     }
   }
@@ -370,7 +520,7 @@ function commentContextActivity(
   issue: BacklogIssue,
   previousComments: BacklogComment[],
   currentComment: BacklogComment,
-  metadata: Record<string, unknown>
+  metadata: Record<string, unknown>,
 ): NormalizedActivity | undefined {
   if (previousComments.length === 0) {
     return undefined;
@@ -378,11 +528,15 @@ function commentContextActivity(
 
   const body = [
     `Issue summary: ${issue.summary}`,
-    issue.description?.trim() ? `Issue description: ${compactText(issue.description, COMMENT_CONTEXT_BODY_LIMIT)}` : "",
+    issue.description?.trim()
+      ? `Issue description: ${compactText(issue.description, COMMENT_CONTEXT_BODY_LIMIT)}`
+      : "",
     "Recent Backlog discussion before the user's comment:",
     ...previousComments.map(formatContextComment),
-    `User comment: ${formatContextComment(currentComment)}`
-  ].filter(Boolean).join("\n");
+    `User comment: ${formatContextComment(currentComment)}`,
+  ]
+    .filter(Boolean)
+    .join("\n");
 
   return {
     source: "backlog",
@@ -396,24 +550,32 @@ function commentContextActivity(
     metadata: compactMetadata({
       ...metadata,
       contextForCommentId: currentComment.id,
-      contextCommentIds: previousComments.map((comment) => comment.id)
-    })
+      contextCommentIds: previousComments.map((comment) => comment.id),
+    }),
   };
 }
 
-function previousContextComments(comments: BacklogComment[], currentComment: BacklogComment): BacklogComment[] {
+function previousContextComments(
+  comments: BacklogComment[],
+  currentComment: BacklogComment,
+): BacklogComment[] {
   return comments
     .filter((comment) => comment.id !== currentComment.id)
     .filter((comment) => comment.content?.trim())
     .filter((comment) => !isLowSignalContextComment(comment.content ?? ""))
-    .filter((comment) => !isSameBacklogUser(comment.createdUser, currentComment.createdUser))
-    .filter((comment) => isBeforeOrSame(comment.created, currentComment.created))
+    .filter(
+      (comment) =>
+        !isSameBacklogUser(comment.createdUser, currentComment.createdUser),
+    )
+    .filter((comment) =>
+      isBeforeOrSame(comment.created, currentComment.created),
+    )
     .slice(-COMMENT_CONTEXT_LIMIT);
 }
 
 function commentContextMetadata(
   issue: BacklogIssue,
-  previousComments: BacklogComment[]
+  previousComments: BacklogComment[],
 ): Record<string, unknown> | undefined {
   const issueDescription = issue.description?.trim()
     ? compactText(issue.description, COMMENT_CONTEXT_BODY_LIMIT)
@@ -427,7 +589,7 @@ function commentContextMetadata(
   return compactMetadata({
     issueSummary: issue.summary,
     issueDescription,
-    previousComments: previousCommentEvidence
+    previousComments: previousCommentEvidence,
   });
 }
 
@@ -436,7 +598,7 @@ function commentEvidence(comment: BacklogComment): Record<string, unknown> {
     id: comment.id,
     author: comment.createdUser?.name,
     createdAt: comment.created,
-    body: compactText(comment.content ?? "", COMMENT_CONTEXT_BODY_LIMIT)
+    body: compactText(comment.content ?? "", COMMENT_CONTEXT_BODY_LIMIT),
   });
 }
 
@@ -454,11 +616,14 @@ function isLowSignalContextComment(value: string): boolean {
     .trim();
 
   return /^(確認しました|確認済みです?|確認いたしました|確認完了|承知しました|了解しました|ok|okay|thanks|thank you|lgtm)$/iu.test(
-    normalized
+    normalized,
   );
 }
 
-function isSameBacklogUser(left: BacklogUser | undefined, right: BacklogUser | undefined): boolean {
+function isSameBacklogUser(
+  left: BacklogUser | undefined,
+  right: BacklogUser | undefined,
+): boolean {
   if (left?.id !== undefined && right?.id !== undefined) {
     return left.id === right.id;
   }
@@ -474,7 +639,10 @@ function normalizeSpeakerName(value: string): string {
   return value.replace(/^@+/, "").replace(/\s+/g, "").trim();
 }
 
-function isBeforeOrSame(left: string | undefined, right: string | undefined): boolean {
+function isBeforeOrSame(
+  left: string | undefined,
+  right: string | undefined,
+): boolean {
   if (!left || !right) {
     return true;
   }
@@ -483,9 +651,9 @@ function isBeforeOrSame(left: string | undefined, right: string | undefined): bo
 }
 
 async function backlogGet<T>(
-  config: BacklogSpaceContext,
+  config: BacklogRequestContext,
   path: string,
-  params: Record<string, QueryValue>
+  params: Record<string, QueryValue>,
 ): Promise<T> {
   const host = backlogHost(config);
   const url = new URL(`https://${host}/api/v2${path}`);
@@ -505,8 +673,8 @@ async function backlogGet<T>(
   const response = await fetch(url, {
     headers: {
       Accept: "application/json",
-      "User-Agent": "gitppou"
-    }
+      "User-Agent": "gitppou",
+    },
   });
 
   if (!response.ok) {
@@ -516,22 +684,62 @@ async function backlogGet<T>(
   return (await response.json()) as T;
 }
 
-function isAssignedToUser(config: BacklogSpaceContext, issue: BacklogIssue): boolean {
-  return Boolean(config.backlogUserId && String(issue.assignee?.id) === config.backlogUserId);
+async function backlogPostForm<T>(
+  config: BacklogRequestContext,
+  path: string,
+  form: Record<string, string | number | boolean>,
+): Promise<T> {
+  const host = backlogHost(config);
+  const url = new URL(`https://${host}/api/v2${path}`);
+  url.searchParams.set("apiKey", config.backlogApiKey);
+  const body = new URLSearchParams();
+  for (const [key, value] of Object.entries(form)) {
+    body.set(key, String(value));
+  }
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/x-www-form-urlencoded",
+      "User-Agent": "gitppou",
+    },
+    body,
+  });
+
+  if (!response.ok) {
+    throw new Error(await backlogErrorMessage(config, host, path, response));
+  }
+
+  return (await response.json()) as T;
 }
 
-function issueMetadata(config: BacklogSpaceContext, issue: BacklogIssue): Record<string, unknown> {
+function isAssignedToUser(
+  config: BacklogSpaceContext,
+  issue: BacklogIssue,
+): boolean {
+  return Boolean(
+    config.backlogUserId && String(issue.assignee?.id) === config.backlogUserId,
+  );
+}
+
+function issueMetadata(
+  config: BacklogSpaceContext,
+  issue: BacklogIssue,
+): Record<string, unknown> {
   return compactMetadata({
     backlogIssueId: issue.id,
     backlogSpace: config.space,
     issueType: issue.issueType?.name,
     categories: namesOf(issue.category),
     milestones: namesOf(issue.milestone),
-    status: issue.status?.name
+    status: issue.status?.name,
   });
 }
 
-function namesOf(values: BacklogNamedValue[] | null | undefined): string[] | undefined {
+function namesOf(
+  values: BacklogNamedValue[] | null | undefined,
+): string[] | undefined {
   const names = (values ?? []).map((value) => value.name).filter(Boolean);
   return names.length > 0 ? names : undefined;
 }
@@ -541,22 +749,24 @@ function dateOnly(value: string | null | undefined): string | undefined {
 }
 
 function isResolvedBacklogStatus(status: string): boolean {
-  return /done|closed|resolved|completed|処理済み|完了|対応済み|終了|クローズ/i.test(status);
+  return /done|closed|resolved|completed|処理済み|完了|対応済み|終了|クローズ/i.test(
+    status,
+  );
 }
 
-function backlogHost(config: BacklogSpaceContext): string {
+function backlogHost(config: BacklogRequestContext): string {
   return config.host?.trim() || `${config.space}.backlog.com`;
 }
 
 async function backlogErrorMessage(
-  config: BacklogSpaceContext,
+  config: BacklogRequestContext,
   host: string,
   path: string,
-  response: Response
+  response: Response,
 ): Promise<string> {
   const details = compactResponseBody(await safeResponseText(response));
   const hostHint = host.endsWith(".backlog.com")
-    ? ` If this space uses backlog.jp or another Backlog host, set backlog.spaces.${config.space}.host.`
+    ? ` If this space uses backlog.jp or another Backlog host, set backlog.spaces.${config.space}.host or backlog.document.host.`
     : "";
   const assigneeHint = /assigneeId/i.test(details)
     ? " Check backlog.userId. It must be the numeric Backlog user id for this space; omit backlog.userId to use the API key owner from /users/myself."
@@ -566,8 +776,10 @@ async function backlogErrorMessage(
     `Backlog API request failed for https://${host}/api/v2${path} with status ${response.status}.`,
     details ? `Response: ${details}.` : "",
     hostHint,
-    assigneeHint
-  ].filter(Boolean).join(" ");
+    assigneeHint,
+  ]
+    .filter(Boolean)
+    .join(" ");
 }
 
 async function safeResponseText(response: Response): Promise<string> {
@@ -584,7 +796,9 @@ function compactResponseBody(value: string): string {
 
 function compactText(value: string, maxChars: number): string {
   const compact = value.replace(/\s+/g, " ").trim();
-  return compact.length > maxChars ? `${compact.slice(0, maxChars)}...` : compact;
+  return compact.length > maxChars
+    ? `${compact.slice(0, maxChars)}...`
+    : compact;
 }
 
 function buildIssueUrl(config: BacklogSpaceContext, issueKey: string): string {
@@ -595,7 +809,10 @@ function getProjectKey(issueKey: string): string {
   return issueKey.split("-")[0] ?? issueKey;
 }
 
-function describeStatusChange(originalValue: string | undefined, newValue: string | undefined): string {
+function describeStatusChange(
+  originalValue: string | undefined,
+  newValue: string | undefined,
+): string {
   if (originalValue && newValue) {
     return `Status changed from "${originalValue}" to "${newValue}".`;
   }
@@ -607,7 +824,9 @@ function describeStatusChange(originalValue: string | undefined, newValue: strin
   return "Status changed.";
 }
 
-function compactMetadata(values: Record<string, unknown>): Record<string, unknown> {
+function compactMetadata(
+  values: Record<string, unknown>,
+): Record<string, unknown> {
   return Object.fromEntries(
     Object.entries(values).filter(([, value]) => {
       if (value === undefined || value === null || value === "") {
@@ -619,6 +838,6 @@ function compactMetadata(values: Record<string, unknown>): Record<string, unknow
       }
 
       return true;
-    })
+    }),
   );
 }

@@ -568,8 +568,8 @@ class OidcClient {
             const res = yield httpclient
                 .getJson(id_token_url)
                 .catch(error => {
-                throw new Error(`Failed to get ID Token. \n
-        Error Code : ${error.statusCode}\n
+                throw new Error(`Failed to get ID Token. \n 
+        Error Code : ${error.statusCode}\n 
         Error Message: ${error.message}`);
             });
             const id_token = (_a = res.result) === null || _a === void 0 ? void 0 : _a.value;
@@ -29472,7 +29472,7 @@ class Document {
             replacer = undefined;
         }
         const { aliasDuplicateObjects, anchorPrefix, flow, keepUndefined, onTagObj, tag } = options ?? {};
-        const { onAnchor, setAnchors, sourceObjects } = anchors.createNodeAnchors(this,
+        const { onAnchor, setAnchors, sourceObjects } = anchors.createNodeAnchors(this, 
         // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing
         anchorPrefix || 'a');
         const ctx = {
@@ -36399,12 +36399,23 @@ async function main() {
             config = await (0,_config_js__WEBPACK_IMPORTED_MODULE_2__/* .readActionConfig */ .P)();
         }
         const sendSlackAfterCommit = config.commitReport && config.slackNotify;
-        const result = await (0,_gitppou_core__WEBPACK_IMPORTED_MODULE_1__/* .generateDailyReport */ .jl)(sendSlackAfterCommit
+        const publishBacklogDocumentAfterCommit = config.commitReport && config.backlogDocument;
+        const result = await (0,_gitppou_core__WEBPACK_IMPORTED_MODULE_1__/* .generateDailyReport */ .jl)(sendSlackAfterCommit || publishBacklogDocumentAfterCommit
             ? {
                 ...config,
-                deferSlackNotification: true,
+                ...(sendSlackAfterCommit ? { deferSlackNotification: true } : {}),
+                deferBacklogDocumentPublish: true,
             }
             : config);
+        if (config.commitReport) {
+            await (0,_git_js__WEBPACK_IMPORTED_MODULE_3__/* .commitReportIfNeeded */ .O)({
+                reportPaths: result.reportPaths,
+                reportDate: config.reportDate,
+            });
+        }
+        const backlogDocument = publishBacklogDocumentAfterCommit
+            ? await (0,_gitppou_core__WEBPACK_IMPORTED_MODULE_1__/* .publishBacklogDocument */ .s4)(config, result.reportMarkdown)
+            : result.backlogDocument;
         _actions_core__WEBPACK_IMPORTED_MODULE_0__.setOutput("report-path", result.reportPath);
         _actions_core__WEBPACK_IMPORTED_MODULE_0__.setOutput("report-paths", result.reportPaths.join("\n"));
         if (result.reportHtmlPath) {
@@ -36413,13 +36424,11 @@ async function main() {
         if (result.reportPdfPath) {
             _actions_core__WEBPACK_IMPORTED_MODULE_0__.setOutput("report-pdf-path", result.reportPdfPath);
         }
-        _actions_core__WEBPACK_IMPORTED_MODULE_0__.setOutput("report-markdown", result.reportMarkdown);
-        if (config.commitReport) {
-            await (0,_git_js__WEBPACK_IMPORTED_MODULE_3__/* .commitReportIfNeeded */ .O)({
-                reportPaths: result.reportPaths,
-                reportDate: config.reportDate,
-            });
+        if (backlogDocument) {
+            _actions_core__WEBPACK_IMPORTED_MODULE_0__.setOutput("backlog-document-id", backlogDocument.id);
+            _actions_core__WEBPACK_IMPORTED_MODULE_0__.setOutput("backlog-document-title", backlogDocument.title);
         }
+        _actions_core__WEBPACK_IMPORTED_MODULE_0__.setOutput("report-markdown", result.reportMarkdown);
         if (sendSlackAfterCommit) {
             try {
                 await (0,_gitppou_core__WEBPACK_IMPORTED_MODULE_1__/* .sendSlackNotification */ .g4)(config.slackWebhookUrl, result.slackSummary);
@@ -36451,6 +36460,7 @@ __webpack_async_result__();
 __nccwpck_require__.d(__webpack_exports__, {
   dt: () => (/* reexport */ buildGitppouConfig),
   jl: () => (/* reexport */ generateDailyReport),
+  s4: () => (/* reexport */ publishBacklogDocument),
   g4: () => (/* reexport */ sendSlackNotification)
 });
 
@@ -36614,6 +36624,8 @@ function buildGitppouConfig(rawConfig, options, env, now = new Date()) {
     const slack = getSection(root, "slack");
     const git = getSection(root, "git");
     const githubTokensByOwner = resolveGitHubTokensByOwner(github, env);
+    const configuredBacklogSpaces = backlog.spaces === undefined ? [] : parseBacklogSpaces(backlog.spaces);
+    const backlogDocument = resolveBacklogDocument(backlog, configuredBacklogSpaces);
     const reportTimezone = options.reportTimezone ??
         getString(report, "timezone", "config.report.timezone") ??
         DEFAULT_REPORT_TIMEZONE;
@@ -36625,12 +36637,14 @@ function buildGitppouConfig(rawConfig, options, env, now = new Date()) {
         getOptionalBoolean(slack, "notify", "config.slack.notify") ??
         true;
     const backlogEnabled = getOptionalBoolean(backlog, "enabled", "config.backlog.enabled") ??
-        hasBacklogSection;
+        shouldEnableBacklogActivities(hasBacklogSection, backlog);
     const config = {
         githubToken: requiredEnv(env, getString(github, "tokenEnv", "config.github.tokenEnv") || "GITHUB_TOKEN"),
         githubUsername: requiredString(github, "username", "config.github.username"),
         githubRepos: getGitHubRepoSpecs(github, "repos", "config.github.repos"),
-        backlogSpaces: backlogEnabled ? resolveBacklogSpaces(backlog) : [],
+        backlogSpaces: backlogEnabled
+            ? resolveBacklogSpaces(backlog, configuredBacklogSpaces)
+            : [],
         reportDate,
         reportTimezone,
         reportLanguage: parseReportLanguage(options.reportLanguage ??
@@ -36660,8 +36674,13 @@ function buildGitppouConfig(rawConfig, options, env, now = new Date()) {
     if (Object.keys(githubTokensByOwner).length > 0) {
         config.githubTokensByOwner = githubTokensByOwner;
     }
-    if (backlogEnabled) {
+    if (backlogDocument) {
+        config.backlogDocument = backlogDocument;
+    }
+    if (backlogEnabled || backlogDocument) {
         config.backlogApiKey = requiredEnv(env, "BACKLOG_API_KEY");
+    }
+    if (backlogEnabled) {
         const backlogUserId = getString(backlog, "userId", "config.backlog.userId");
         if (backlogUserId) {
             config.backlogUserId = normalizeBacklogUserId(backlogUserId, "config.backlog.userId");
@@ -36694,6 +36713,13 @@ function parseReportFormat(value, pathLabel) {
         return value;
     }
     throw new Error(`${pathLabel} must contain only markdown, html, or pdf.`);
+}
+function shouldEnableBacklogActivities(hasBacklogSection, backlog) {
+    if (!hasBacklogSection) {
+        return false;
+    }
+    const keys = Object.keys(backlog);
+    return keys.length === 0 || keys.some((key) => key !== "document");
 }
 function getSection(root, key) {
     const value = root[key];
@@ -36871,7 +36897,7 @@ function getOptionalBoolean(section, key, pathLabel) {
     }
     return value;
 }
-function resolveBacklogSpaces(backlog) {
+function resolveBacklogSpaces(backlog, configuredBacklogSpaces) {
     if (backlog.space !== undefined ||
         backlog.projectKeys !== undefined ||
         backlog.apiKeyEnv !== undefined) {
@@ -36880,7 +36906,7 @@ function resolveBacklogSpaces(backlog) {
     if (backlog.spaces === undefined) {
         throw new Error("config.backlog.spaces is required.");
     }
-    return parseBacklogSpaces(backlog.spaces);
+    return configuredBacklogSpaces;
 }
 function parseBacklogSpaces(value) {
     const spaces = asObject(value, "config.backlog.spaces");
@@ -36910,6 +36936,65 @@ function parseBacklogSpaceConfig(space, value, pathLabel) {
         config.host = normalizeBacklogHost(host, `${pathLabel}.host`);
     }
     return config;
+}
+function resolveBacklogDocument(backlog, configuredBacklogSpaces) {
+    if (backlog.document === undefined) {
+        return undefined;
+    }
+    const section = asObject(backlog.document, "config.backlog.document");
+    const enabled = getOptionalBoolean(section, "enabled", "config.backlog.document.enabled") ??
+        true;
+    if (!enabled) {
+        return undefined;
+    }
+    const space = getString(section, "space", "config.backlog.document.space") ??
+        inferBacklogDocumentSpace(configuredBacklogSpaces);
+    const matchedSpace = configuredBacklogSpaces.find((spaceConfig) => spaceConfig.space === space);
+    const host = getString(section, "host", "config.backlog.document.host") ??
+        matchedSpace?.host;
+    const projectId = getOptionalPositiveInteger(section, "projectId", "config.backlog.document.projectId");
+    const projectKey = getString(section, "projectKey", "config.backlog.document.projectKey");
+    if (projectId === undefined && !projectKey) {
+        throw new Error("config.backlog.document.projectId or config.backlog.document.projectKey is required.");
+    }
+    if (projectId !== undefined && projectKey) {
+        throw new Error("Specify only one of config.backlog.document.projectId or config.backlog.document.projectKey.");
+    }
+    const config = {
+        space,
+    };
+    if (host) {
+        config.host = normalizeBacklogHost(host, "config.backlog.document.host");
+    }
+    if (projectId !== undefined) {
+        config.projectId = projectId;
+    }
+    if (projectKey) {
+        config.projectKey = projectKey;
+    }
+    const parentId = getString(section, "parentId", "config.backlog.document.parentId");
+    if (parentId) {
+        config.parentId = parentId;
+    }
+    const title = getString(section, "title", "config.backlog.document.title");
+    if (title) {
+        config.title = title;
+    }
+    const emoji = getString(section, "emoji", "config.backlog.document.emoji");
+    if (emoji) {
+        config.emoji = emoji;
+    }
+    const addLast = getOptionalBoolean(section, "addLast", "config.backlog.document.addLast");
+    if (addLast !== undefined) {
+        config.addLast = addLast;
+    }
+    return config;
+}
+function inferBacklogDocumentSpace(configuredBacklogSpaces) {
+    if (configuredBacklogSpaces.length === 1) {
+        return configuredBacklogSpaces[0]?.space ?? "";
+    }
+    throw new Error("config.backlog.document.space is required unless exactly one config.backlog.spaces entry is configured.");
 }
 function normalizeBacklogHost(value, pathLabel) {
     const normalized = value
@@ -36991,11 +37076,62 @@ async function fetchBacklogActivities(config) {
     const activitySets = await Promise.all(config.backlogSpaces.map((spaceConfig) => fetchBacklogSpaceActivities({
         ...spaceConfig,
         backlogApiKey,
-        ...(config.backlogUserId ? { backlogUserId: config.backlogUserId } : {}),
+        ...(config.backlogUserId
+            ? { backlogUserId: config.backlogUserId }
+            : {}),
         reportDate: config.reportDate,
-        reportTimezone: config.reportTimezone
+        reportTimezone: config.reportTimezone,
     })));
     return activitySets.flat();
+}
+async function publishBacklogDocument(config, reportMarkdown) {
+    if (!config.backlogDocument) {
+        return undefined;
+    }
+    if (!config.backlogApiKey) {
+        throw new Error("BACKLOG_API_KEY is required when Backlog document publishing is enabled.");
+    }
+    const documentConfig = {
+        ...config.backlogDocument,
+        backlogApiKey: config.backlogApiKey,
+        reportDate: config.reportDate,
+        reportLanguage: config.reportLanguage,
+    };
+    const projectId = documentConfig.projectId ??
+        (await resolveDocumentProjectId(documentConfig));
+    const title = documentTitle(documentConfig);
+    const response = await backlogPostForm(documentConfig, "/documents", {
+        projectId,
+        title,
+        content: reportMarkdown,
+        ...(documentConfig.parentId ? { parentId: documentConfig.parentId } : {}),
+        ...(documentConfig.emoji ? { emoji: documentConfig.emoji } : {}),
+        ...(documentConfig.addLast !== undefined
+            ? { addLast: documentConfig.addLast }
+            : {}),
+    });
+    return {
+        id: response.id,
+        projectId: response.projectId,
+        title: response.title,
+    };
+}
+async function resolveDocumentProjectId(config) {
+    if (!config.projectKey) {
+        throw new Error("backlog.document.projectKey is required when projectId is omitted.");
+    }
+    const projects = await backlogGet(config, "/projects", {});
+    const project = projects.find((candidate) => candidate.projectKey.toUpperCase() === config.projectKey?.toUpperCase());
+    if (!project) {
+        throw new Error(`Backlog project key not found in ${config.space}: ${config.projectKey}`);
+    }
+    return project.id;
+}
+function documentTitle(config) {
+    const fallback = config.reportLanguage === "ja"
+        ? `日報 ${config.reportDate}`
+        : `Daily Report ${config.reportDate}`;
+    return (config.title || fallback).replace(/\{\{\s*date\s*\}\}/g, config.reportDate);
 }
 async function fetchBacklogSpaceActivities(config) {
     const resolvedConfig = await resolveBacklogUserId(config);
@@ -37007,14 +37143,11 @@ async function fetchBacklogSpaceActivities(config) {
         const comments = commentLists[index] ?? [];
         const commentActivities = commentsToActivities(resolvedConfig, issue, comments);
         const issueActivities = issueToActivities(resolvedConfig, issue).filter((activity) => activity.kind !== "issue" || commentActivities.length === 0);
-        return [
-            ...issueActivities,
-            ...commentActivities
-        ];
+        return [...issueActivities, ...commentActivities];
     });
     return [
         ...activityItems,
-        ...assignedProgressIssues.flatMap((issue) => issueToAssignedProgressActivity(resolvedConfig, issue))
+        ...assignedProgressIssues.flatMap((issue) => issueToAssignedProgressActivity(resolvedConfig, issue)),
     ];
 }
 async function resolveBacklogUserId(config) {
@@ -37024,7 +37157,7 @@ async function resolveBacklogUserId(config) {
     const user = await backlogGet(config, "/users/myself", {});
     return {
         ...config,
-        backlogUserId: String(user.id)
+        backlogUserId: String(user.id),
     };
 }
 async function resolveProjectIds(config) {
@@ -37046,7 +37179,7 @@ async function fetchRelevantIssues(config, projectIds) {
     const commonParams = {
         count: 100,
         sort: "updated",
-        order: "desc"
+        order: "desc",
     };
     if (projectIds.length > 0) {
         commonParams["projectId[]"] = projectIds;
@@ -37054,14 +37187,14 @@ async function fetchRelevantIssues(config, projectIds) {
     const updatedIssues = await backlogGet(config, "/issues", {
         ...commonParams,
         updatedSince: config.reportDate,
-        updatedUntil: config.reportDate
+        updatedUntil: config.reportDate,
     });
     const assignedIssues = config.backlogUserId
         ? await backlogGet(config, "/issues", {
             ...commonParams,
             "assigneeId[]": [config.backlogUserId],
             updatedSince: config.reportDate,
-            updatedUntil: config.reportDate
+            updatedUntil: config.reportDate,
         })
         : [];
     const issues = new Map();
@@ -37078,7 +37211,7 @@ async function fetchAssignedProgressIssues(config, projectIds) {
         count: ASSIGNED_PROGRESS_FETCH_LIMIT,
         sort: "updated",
         order: "desc",
-        "assigneeId[]": [config.backlogUserId]
+        "assigneeId[]": [config.backlogUserId],
     };
     if (projectIds.length > 0) {
         params["projectId[]"] = projectIds;
@@ -37088,7 +37221,7 @@ async function fetchAssignedProgressIssues(config, projectIds) {
 async function fetchIssueComments(config, issueKey) {
     return backlogGet(config, `/issues/${encodeURIComponent(issueKey)}/comments`, {
         count: 100,
-        order: "asc"
+        order: "asc",
     });
 }
 function issueToActivities(config, issue) {
@@ -37106,7 +37239,7 @@ function issueToActivities(config, issue) {
             url: buildIssueUrl(config, issue.issueKey),
             ...(issue.created ? { createdAt: issue.created } : {}),
             ...(issue.updated ? { updatedAt: issue.updated } : {}),
-            metadata
+            metadata,
         });
     }
     if (issue.dueDate === config.reportDate && isAssignedToUser(config, issue)) {
@@ -37118,7 +37251,7 @@ function issueToActivities(config, issue) {
             title: `${issue.issueKey} due: ${issue.summary}`,
             url: buildIssueUrl(config, issue.issueKey),
             ...(issue.updated ? { updatedAt: issue.updated } : {}),
-            metadata
+            metadata,
         });
     }
     return activities;
@@ -37148,9 +37281,9 @@ function issueToAssignedProgressActivity(config, issue) {
             metadata: compactMetadata({
                 ...issueMetadata(config, issue),
                 ...(startDate ? { startDate } : {}),
-                ...(dueDate ? { dueDate } : {})
-            })
-        }
+                ...(dueDate ? { dueDate } : {}),
+            }),
+        },
     ];
 }
 function commentsToActivities(config, issue, comments) {
@@ -37160,7 +37293,8 @@ function commentsToActivities(config, issue, comments) {
         if (!isOnReportDate(comment.created, config.reportDate, config.reportTimezone)) {
             continue;
         }
-        if (config.backlogUserId && String(comment.createdUser?.id) !== config.backlogUserId) {
+        if (config.backlogUserId &&
+            String(comment.createdUser?.id) !== config.backlogUserId) {
             continue;
         }
         const url = `${buildIssueUrl(config, issue.issueKey)}#comment-${comment.id}`;
@@ -37169,11 +37303,11 @@ function commentsToActivities(config, issue, comments) {
         const baseMetadata = compactMetadata({
             ...issueMetadata(config, issue),
             backlogCommentId: comment.id,
-            author: comment.createdUser?.name
+            author: comment.createdUser?.name,
         });
         const metadata = compactMetadata({
             ...baseMetadata,
-            ...(commentContext ? { commentContext } : {})
+            ...(commentContext ? { commentContext } : {}),
         });
         if (comment.content?.trim()) {
             activities.push({
@@ -37186,7 +37320,7 @@ function commentsToActivities(config, issue, comments) {
                 url,
                 ...(comment.created ? { createdAt: comment.created } : {}),
                 ...(comment.updated ? { updatedAt: comment.updated } : {}),
-                metadata
+                metadata,
             });
             const contextActivity = commentContextActivity(config, issue, previousComments, comment, baseMetadata);
             if (contextActivity) {
@@ -37211,8 +37345,8 @@ function commentsToActivities(config, issue, comments) {
                     field: change.field,
                     status: change.newValue,
                     originalValue: change.originalValue,
-                    newValue: change.newValue
-                })
+                    newValue: change.newValue,
+                }),
             });
         }
     }
@@ -37224,11 +37358,15 @@ function commentContextActivity(config, issue, previousComments, currentComment,
     }
     const body = [
         `Issue summary: ${issue.summary}`,
-        issue.description?.trim() ? `Issue description: ${compactText(issue.description, COMMENT_CONTEXT_BODY_LIMIT)}` : "",
+        issue.description?.trim()
+            ? `Issue description: ${compactText(issue.description, COMMENT_CONTEXT_BODY_LIMIT)}`
+            : "",
         "Recent Backlog discussion before the user's comment:",
         ...previousComments.map(formatContextComment),
-        `User comment: ${formatContextComment(currentComment)}`
-    ].filter(Boolean).join("\n");
+        `User comment: ${formatContextComment(currentComment)}`,
+    ]
+        .filter(Boolean)
+        .join("\n");
     return {
         source: "backlog",
         kind: "comment_context",
@@ -37241,8 +37379,8 @@ function commentContextActivity(config, issue, previousComments, currentComment,
         metadata: compactMetadata({
             ...metadata,
             contextForCommentId: currentComment.id,
-            contextCommentIds: previousComments.map((comment) => comment.id)
-        })
+            contextCommentIds: previousComments.map((comment) => comment.id),
+        }),
     };
 }
 function previousContextComments(comments, currentComment) {
@@ -37265,7 +37403,7 @@ function commentContextMetadata(issue, previousComments) {
     return compactMetadata({
         issueSummary: issue.summary,
         issueDescription,
-        previousComments: previousCommentEvidence
+        previousComments: previousCommentEvidence,
     });
 }
 function commentEvidence(comment) {
@@ -37273,7 +37411,7 @@ function commentEvidence(comment) {
         id: comment.id,
         author: comment.createdUser?.name,
         createdAt: comment.created,
-        body: compactText(comment.content ?? "", COMMENT_CONTEXT_BODY_LIMIT)
+        body: compactText(comment.content ?? "", COMMENT_CONTEXT_BODY_LIMIT),
     });
 }
 function formatContextComment(comment) {
@@ -37323,8 +37461,30 @@ async function backlogGet(config, path, params) {
     const response = await fetch(url, {
         headers: {
             Accept: "application/json",
-            "User-Agent": "gitppou"
-        }
+            "User-Agent": "gitppou",
+        },
+    });
+    if (!response.ok) {
+        throw new Error(await backlogErrorMessage(config, host, path, response));
+    }
+    return (await response.json());
+}
+async function backlogPostForm(config, path, form) {
+    const host = backlogHost(config);
+    const url = new URL(`https://${host}/api/v2${path}`);
+    url.searchParams.set("apiKey", config.backlogApiKey);
+    const body = new URLSearchParams();
+    for (const [key, value] of Object.entries(form)) {
+        body.set(key, String(value));
+    }
+    const response = await fetch(url, {
+        method: "POST",
+        headers: {
+            Accept: "application/json",
+            "Content-Type": "application/x-www-form-urlencoded",
+            "User-Agent": "gitppou",
+        },
+        body,
     });
     if (!response.ok) {
         throw new Error(await backlogErrorMessage(config, host, path, response));
@@ -37341,7 +37501,7 @@ function issueMetadata(config, issue) {
         issueType: issue.issueType?.name,
         categories: namesOf(issue.category),
         milestones: namesOf(issue.milestone),
-        status: issue.status?.name
+        status: issue.status?.name,
     });
 }
 function namesOf(values) {
@@ -37360,7 +37520,7 @@ function backlogHost(config) {
 async function backlogErrorMessage(config, host, path, response) {
     const details = compactResponseBody(await safeResponseText(response));
     const hostHint = host.endsWith(".backlog.com")
-        ? ` If this space uses backlog.jp or another Backlog host, set backlog.spaces.${config.space}.host.`
+        ? ` If this space uses backlog.jp or another Backlog host, set backlog.spaces.${config.space}.host or backlog.document.host.`
         : "";
     const assigneeHint = /assigneeId/i.test(details)
         ? " Check backlog.userId. It must be the numeric Backlog user id for this space; omit backlog.userId to use the API key owner from /users/myself."
@@ -37369,8 +37529,10 @@ async function backlogErrorMessage(config, host, path, response) {
         `Backlog API request failed for https://${host}/api/v2${path} with status ${response.status}.`,
         details ? `Response: ${details}.` : "",
         hostHint,
-        assigneeHint
-    ].filter(Boolean).join(" ");
+        assigneeHint,
+    ]
+        .filter(Boolean)
+        .join(" ");
 }
 async function safeResponseText(response) {
     try {
@@ -37385,7 +37547,9 @@ function compactResponseBody(value) {
 }
 function compactText(value, maxChars) {
     const compact = value.replace(/\s+/g, " ").trim();
-    return compact.length > maxChars ? `${compact.slice(0, maxChars)}...` : compact;
+    return compact.length > maxChars
+        ? `${compact.slice(0, maxChars)}...`
+        : compact;
 }
 function buildIssueUrl(config, issueKey) {
     return `https://${backlogHost(config)}/view/${issueKey}`;
@@ -44347,6 +44511,9 @@ async function generateDailyReport(config) {
         await saveReportPdf(reportHtml, reportPdfPath);
         reportPaths.push(reportPdfPath);
     }
+    const backlogDocument = config.deferBacklogDocumentPublish
+        ? undefined
+        : await publishBacklogDocument(config, reportMarkdown);
     const slackSummaryText = await generateSlackSummaryText(config, reportMarkdown);
     const primaryReportPath = reportPdfPath ?? reportHtmlPath ?? markdownPath;
     const slackSummary = generateSlackSummary(config, reportPaths, reportMarkdown, slackSummaryText);
@@ -44365,6 +44532,7 @@ async function generateDailyReport(config) {
         reportPaths,
         reportMarkdown,
         slackSummary,
+        ...(backlogDocument ? { backlogDocument } : {}),
     };
 }
 async function generateSlackSummaryText(config, reportMarkdown) {
@@ -44445,7 +44613,7 @@ function formatError(error) {
 /************************************************************************/
 /******/ // The module cache
 /******/ var __webpack_module_cache__ = {};
-/******/
+/******/ 
 /******/ // The require function
 /******/ function __nccwpck_require__(moduleId) {
 /******/ 	// Check if module is in cache
@@ -44459,7 +44627,7 @@ function formatError(error) {
 /******/ 		// no module.loaded needed
 /******/ 		exports: {}
 /******/ 	};
-/******/
+/******/ 
 /******/ 	// Execute the module function
 /******/ 	var threw = true;
 /******/ 	try {
@@ -44468,11 +44636,11 @@ function formatError(error) {
 /******/ 	} finally {
 /******/ 		if(threw) delete __webpack_module_cache__[moduleId];
 /******/ 	}
-/******/
+/******/ 
 /******/ 	// Return the exports of the module
 /******/ 	return module.exports;
 /******/ }
-/******/
+/******/ 
 /************************************************************************/
 /******/ /* webpack/runtime/async module */
 /******/ (() => {
@@ -44542,7 +44710,7 @@ function formatError(error) {
 /******/ 		queue && queue.d < 0 && (queue.d = 0);
 /******/ 	};
 /******/ })();
-/******/
+/******/ 
 /******/ /* webpack/runtime/define property getters */
 /******/ (() => {
 /******/ 	// define getter functions for harmony exports
@@ -44554,23 +44722,23 @@ function formatError(error) {
 /******/ 		}
 /******/ 	};
 /******/ })();
-/******/
+/******/ 
 /******/ /* webpack/runtime/hasOwnProperty shorthand */
 /******/ (() => {
 /******/ 	__nccwpck_require__.o = (obj, prop) => (Object.prototype.hasOwnProperty.call(obj, prop))
 /******/ })();
-/******/
+/******/ 
 /******/ /* webpack/runtime/compat */
-/******/
+/******/ 
 /******/ if (typeof __nccwpck_require__ !== 'undefined') __nccwpck_require__.ab = new URL('.', import.meta.url).pathname.slice(import.meta.url.match(/^file:\/\/\/\w:/) ? 1 : 0, -1) + "/";
-/******/
+/******/ 
 /************************************************************************/
-/******/
+/******/ 
 /******/ // startup
 /******/ // Load entry module and return exports
 /******/ // This entry module used 'module' so it can't be inlined
 /******/ var __webpack_exports__ = __nccwpck_require__(5512);
 /******/ __webpack_exports__ = await __webpack_exports__;
-/******/
+/******/ 
 
 //# sourceMappingURL=index.js.map

@@ -1,6 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { fetchBacklogActivities } from "./backlog.js";
+import { fetchBacklogActivities, publishBacklogDocument } from "./backlog.js";
 import { fetchGitHubActivities } from "./github.js";
 import { renderReportHtml } from "./html.js";
 import {
@@ -86,6 +86,9 @@ export async function generateDailyReport(
     reportPaths.push(reportPdfPath);
   }
 
+  const backlogDocument = config.deferBacklogDocumentPublish
+    ? undefined
+    : await publishBacklogDocument(config, reportMarkdown);
   const slackSummaryText = await generateSlackSummaryText(
     config,
     reportMarkdown,
@@ -114,6 +117,7 @@ export async function generateDailyReport(
     reportPaths,
     reportMarkdown,
     slackSummary,
+    ...(backlogDocument ? { backlogDocument } : {}),
   };
 }
 

@@ -168,6 +168,7 @@ async function runPreview(options: CliOptions): Promise<void> {
           reportPaths: result.reportPaths,
           reportHtmlPath: result.reportHtmlPath,
           reportPdfPath: result.reportPdfPath,
+          backlogDocument: result.backlogDocument,
           reportMarkdown: result.reportMarkdown,
           slackSummary: result.slackSummary,
           slackNotify: config.slackNotify,
@@ -183,6 +184,11 @@ async function runPreview(options: CliOptions): Promise<void> {
   console.log(`Report date: ${config.reportDate}`);
   for (const reportPath of result.reportPaths) {
     console.log(`Report written: ${reportPath}`);
+  }
+  if (result.backlogDocument) {
+    console.log(
+      `Backlog document created: ${result.backlogDocument.title} (${result.backlogDocument.id})`,
+    );
   }
   console.log(
     `Slack notification: ${config.slackNotify ? "requested" : "skipped"}`,

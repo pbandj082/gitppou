@@ -49,6 +49,46 @@ The default API base URL is:
 https://{space}.backlog.com/api/v2
 ```
 
+## Publishing Reports as Backlog Documents
+
+Gitppou can optionally publish the generated Markdown report to Backlog
+documents after the report is generated:
+
+```yaml
+backlog:
+  spaces:
+    your-space:
+      host: your-space.backlog.jp
+      projectKeys:
+        - APP
+  document:
+    enabled: true
+    space: your-space
+    projectKey: APP
+    # Backlog document parent ID. Omit to create at the project document root.
+    parentId: "parent-document-id"
+    title: "Daily Report {{date}}"
+    addLast: true
+```
+
+Use `projectKey` for a readable config, or `projectId` to skip the project
+lookup. `parentId` is the parent Backlog document ID used as the destination in
+the document tree; you can look up candidate IDs from Backlog's document tree
+API. The title supports `{{date}}`.
+
+Document publishing can be used without Backlog activity collection:
+
+```yaml
+backlog:
+  document:
+    space: your-space
+    host: your-space.backlog.jp
+    projectKey: APP
+```
+
+When `git.commitReport: true` in GitHub Actions, Gitppou publishes the Backlog
+document after the report files have been committed successfully.
+
 ## What Gitppou Collects
 
 The v1 implementation collects:

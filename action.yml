@@ -21,6 +21,10 @@ outputs:
     description: "Generated HTML report file path when HTML output is enabled"
   report-pdf-path:
     description: "Generated PDF report file path when PDF output is enabled"
+  backlog-document-id:
+    description: "Created Backlog document ID when Backlog document publishing is enabled"
+  backlog-document-title:
+    description: "Created Backlog document title when Backlog document publishing is enabled"
   report-markdown:
     description: "Generated report markdown"
 

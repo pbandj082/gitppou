@@ -25,6 +25,23 @@ export type BacklogSpaceConfig = {
   projectKeys: string[];
 };
 
+export type BacklogDocumentConfig = {
+  space: string;
+  host?: string;
+  projectId?: number;
+  projectKey?: string;
+  parentId?: string;
+  title?: string;
+  emoji?: string;
+  addLast?: boolean;
+};
+
+export type BacklogDocumentResult = {
+  id: string;
+  projectId: number;
+  title: string;
+};
+
 export type GitppouConfig = {
   githubToken: string;
   githubTokensByOwner?: Record<string, string>;
@@ -34,6 +51,7 @@ export type GitppouConfig = {
   backlogApiKey?: string;
   backlogUserId?: string;
   backlogSpaces: BacklogSpaceConfig[];
+  backlogDocument?: BacklogDocumentConfig;
 
   reportDate: string;
   reportTimezone: string;
@@ -46,6 +64,7 @@ export type GitppouConfig = {
   commitReport: boolean;
   slackNotify: boolean;
   deferSlackNotification?: boolean;
+  deferBacklogDocumentPublish?: boolean;
   slackWebhookUrl?: string;
   githubActionsContext?: GitHubActionsContext;
 
@@ -107,4 +126,5 @@ export type ReportResult = {
   reportPaths: string[];
   reportMarkdown: string;
   slackSummary: string;
+  backlogDocument?: BacklogDocumentResult;
 };

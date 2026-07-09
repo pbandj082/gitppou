@@ -128,6 +128,67 @@ describe("buildPreviewConfig", () => {
     ]);
   });
 
+  it("builds Backlog document publishing settings", () => {
+    const config = buildPreviewConfig(
+      {
+        github: {
+          username: "octocat",
+        },
+        backlog: {
+          spaces: {
+            example: {
+              host: "example.backlog.jp",
+              projectKeys: ["APP"],
+            },
+          },
+          document: {
+            projectKey: "APP",
+            parentId: "parent-document-id",
+            title: "日報 {{date}}",
+            addLast: true,
+          },
+        },
+      },
+      {},
+      env,
+      new Date("2026-07-05T15:30:00Z"),
+    );
+
+    expect(config.backlogDocument).toEqual({
+      space: "example",
+      host: "example.backlog.jp",
+      projectKey: "APP",
+      parentId: "parent-document-id",
+      title: "日報 {{date}}",
+      addLast: true,
+    });
+  });
+
+  it("does not enable Backlog activity fetching for document-only config", () => {
+    const config = buildPreviewConfig(
+      {
+        github: {
+          username: "octocat",
+        },
+        backlog: {
+          document: {
+            space: "example",
+            projectId: 456,
+          },
+        },
+      },
+      {},
+      env,
+    );
+
+    expect(config.backlogSpaces).toEqual([]);
+    expect(config.backlogApiKey).toBe("backlog-key");
+    expect(config.backlogDocument).toEqual({
+      space: "example",
+      projectId: 456,
+    });
+  });
+
   it("builds GitHub-only config when Backlog is disabled", () => {
     const config = buildPreviewConfig(
       {

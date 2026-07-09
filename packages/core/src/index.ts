@@ -2,6 +2,8 @@ export type {
   ActivityGroup,
   ActivityKind,
   ActivitySource,
+  BacklogDocumentConfig,
+  BacklogDocumentResult,
   BacklogSpaceConfig,
   GitHubRepoOwnerSpec,
   GitHubActionsContext,
@@ -36,7 +38,7 @@ export {
 } from "./config.js";
 export { buildGitppouConfig } from "./config-file.js";
 export type { ConfigBuildOptions, Env } from "./config-file.js";
-export { fetchBacklogActivities } from "./backlog.js";
+export { fetchBacklogActivities, publishBacklogDocument } from "./backlog.js";
 export {
   fetchGitHubActivities,
   parseGitHubRepoSpecString,
