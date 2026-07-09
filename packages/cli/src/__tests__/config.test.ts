@@ -164,6 +164,25 @@ describe("buildPreviewConfig", () => {
     });
   });
 
+  it("builds report author settings", () => {
+    const config = buildPreviewConfig(
+      {
+        github: {
+          username: "octocat",
+        },
+        report: {
+          author: "Octo Cat",
+        },
+      },
+      {},
+      {
+        GITHUB_TOKEN: "github-token",
+      },
+    );
+
+    expect(config.reportAuthor).toBe("Octo Cat");
+  });
+
   it("does not enable Backlog activity fetching for document-only config", () => {
     const config = buildPreviewConfig(
       {

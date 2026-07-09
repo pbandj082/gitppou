@@ -39,6 +39,9 @@ backlog:
   #   addLast: true
 
 report:
+  # Optional display name in the generated report metadata.
+  # Defaults to github.username.
+  # author: Your Name
   language: en
   timezone: Asia/Tokyo
   dir: reports

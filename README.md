@@ -65,6 +65,8 @@ backlog:
   #   title: "Daily Report {{date}}"
 
 report:
+  # Optional. Defaults to github.username.
+  # author: Your Name
   language: en
   timezone: Asia/Tokyo
   dir: reports
@@ -98,9 +100,11 @@ Example:
 reports/2026-07/2026-07-03.md
 ```
 
-Markdown reports start with YAML front matter containing report metadata such
-as `reportDate`, `timezone`, `author`, `generatedBy`, `generatedAt`, and GitHub
-Actions context when available.
+Markdown reports include a compact metadata line below the top-level heading,
+such as `**author**: octocat / **generatedAt**: 2026-07-03 18:00:00
+(Asia/Tokyo)`. Set `report.author` to customize the author label value; when
+omitted, Gitppou uses `github.username`. Japanese reports use Japanese metadata
+labels.
 
 To also save a rendered HTML report:
 

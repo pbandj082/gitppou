@@ -141,6 +141,11 @@ export function buildGitppouConfig(
     config.githubTokensByOwner = githubTokensByOwner;
   }
 
+  const reportAuthor = getString(report, "author", "config.report.author");
+  if (reportAuthor) {
+    config.reportAuthor = reportAuthor;
+  }
+
   if (backlogDocument) {
     config.backlogDocument = backlogDocument;
   }
