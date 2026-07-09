@@ -21,11 +21,12 @@ if (version === "0.0.0") {
 const tag = `v${version}`;
 
 function run(command, args, options = {}) {
-  return execFileSync(command, args, {
+  const output = execFileSync(command, args, {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
     ...options,
-  }).trim();
+  });
+  return typeof output === "string" ? output.trim() : "";
 }
 
 function commandSucceeds(command, args) {
