@@ -307,6 +307,89 @@ describe("report helpers", () => {
     expect(markdown).not.toContain("- この課題について確認コメントを追加");
   });
 
+  it("does not treat low-signal previous confirmations as reply context", () => {
+    const activity: NormalizedActivity = {
+      source: "backlog",
+      kind: "comment",
+      issueKey: "APP-1",
+      title: "APP-1 Updated issue",
+      body: "@Reviewer 実装を更新しました。ご確認お願いいたします。",
+      url: "https://example.backlog.com/view/APP-1#comment-902",
+      metadata: {
+        commentContext: {
+          previousComments: [
+            {
+              id: 901,
+              author: "@Reviewer",
+              createdAt: "2026-07-01T09:00:00+09:00",
+              body: "@alice 確認しました！"
+            }
+          ]
+        }
+      }
+    };
+    const markdown = generateTemplateReport({
+      config: {
+        ...baseConfig,
+        reportLanguage: "ja"
+      },
+      activities: [activity],
+      groups: [
+        {
+          issueKey: "APP-1",
+          title: "Updated issue",
+          activities: [activity]
+        }
+      ]
+    });
+
+    expect(markdown).toContain("- この課題についてコメントを追加");
+    expect(markdown).toContain("  > **投稿コメント**");
+    expect(markdown).not.toContain("関連コメント");
+    expect(markdown).not.toContain("@alice 確認しました");
+  });
+
+  it("does not treat previous comments by the same speaker as reply context", () => {
+    const activity: NormalizedActivity = {
+      source: "backlog",
+      kind: "comment",
+      issueKey: "APP-1",
+      title: "APP-1 Updated issue",
+      body: "@Reviewer 修正を追加しました。",
+      metadata: {
+        author: "Alice",
+        commentContext: {
+          previousComments: [
+            {
+              id: 901,
+              author: "@Alice",
+              createdAt: "2026-07-01T09:00:00+09:00",
+              body: "@Reviewer 先に調査結果を共有しました。"
+            }
+          ]
+        }
+      }
+    };
+    const markdown = generateTemplateReport({
+      config: {
+        ...baseConfig,
+        reportLanguage: "ja"
+      },
+      activities: [activity],
+      groups: [
+        {
+          issueKey: "APP-1",
+          title: "Updated issue",
+          activities: [activity]
+        }
+      ]
+    });
+
+    expect(markdown).toContain("- この課題についてコメントを追加");
+    expect(markdown).not.toContain("関連コメント");
+    expect(markdown).not.toContain("先に調査結果を共有");
+  });
+
   it("renders URLs in comments as Markdown links", () => {
     const activity: NormalizedActivity = {
       source: "backlog",

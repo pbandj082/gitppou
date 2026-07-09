@@ -37191,6 +37191,8 @@ function previousContextComments(comments, currentComment) {
     return comments
         .filter((comment) => comment.id !== currentComment.id)
         .filter((comment) => comment.content?.trim())
+        .filter((comment) => !isLowSignalContextComment(comment.content ?? ""))
+        .filter((comment) => !isSameBacklogUser(comment.createdUser, currentComment.createdUser))
         .filter((comment) => isBeforeOrSame(comment.created, currentComment.created))
         .slice(-COMMENT_CONTEXT_LIMIT);
 }
@@ -37220,6 +37222,26 @@ function formatContextComment(comment) {
     const author = comment.createdUser?.name ?? "Unknown";
     const created = comment.created ?? "unknown date";
     return `- ${created} ${author}: ${compactText(comment.content ?? "", COMMENT_CONTEXT_BODY_LIMIT)}`;
+}
+function isLowSignalContextComment(value) {
+    const normalized = value
+        .replace(/^@[^\s　]+[\s　]*/u, "")
+        .replace(/\s+/g, " ")
+        .replace(/[!！。.\s]+$/gu, "")
+        .trim();
+    return /^(確認しました|確認済みです?|確認いたしました|確認完了|承知しました|了解しました|ok|okay|thanks|thank you|lgtm)$/iu.test(normalized);
+}
+function isSameBacklogUser(left, right) {
+    if (left?.id !== undefined && right?.id !== undefined) {
+        return left.id === right.id;
+    }
+    if (!left?.name || !right?.name) {
+        return false;
+    }
+    return normalizeSpeakerName(left.name) === normalizeSpeakerName(right.name);
+}
+function normalizeSpeakerName(value) {
+    return value.replace(/^@+/, "").replace(/\s+/g, "").trim();
 }
 function isBeforeOrSame(left, right) {
     if (!left || !right) {
@@ -42122,10 +42144,17 @@ function filterUserActionActivities(activities) {
 }
 function filterGroupsByUserActions(groups) {
     return groups
-        .map((group) => ({
-        ...group,
-        activities: group.activities.filter(isUserActionActivity)
-    }))
+        .map((group) => {
+        const activities = group.activities.filter(isUserActionActivity);
+        const title = shouldReplaceGroupTitle(group.title)
+            ? deriveUserActionGroupTitle(group.issueKey, activities) ?? group.title
+            : group.title;
+        return {
+            ...group,
+            ...(title ? { title } : {}),
+            activities
+        };
+    })
         .filter((group) => group.activities.length > 0);
 }
 function buildReportEvidence(activities) {
@@ -42172,6 +42201,28 @@ function compactEvidence(evidence) {
         }
         return true;
     }));
+}
+function deriveUserActionGroupTitle(issueKey, activities) {
+    if (issueKey === "Unlinked") {
+        return undefined;
+    }
+    for (const activity of activities) {
+        const title = stripLeadingIssueKey(activity.title, issueKey);
+        if (title) {
+            return title;
+        }
+    }
+    return undefined;
+}
+function shouldReplaceGroupTitle(title) {
+    return typeof title === "string" && /^comment context:/i.test(title.trim());
+}
+function stripLeadingIssueKey(title, issueKey) {
+    const stripped = title.replace(new RegExp(`^${escapeRegExp(issueKey)}[:：\\s-]*`), "").trim();
+    return stripped || undefined;
+}
+function escapeRegExp(value) {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 ;// CONCATENATED MODULE: ../core/dist/markdown.js
@@ -42484,7 +42535,7 @@ function commentTarget(activity, title, context, language) {
     if (activity.issueKey && activity.issueKey === context.groupIssueKey) {
         return language === "ja" ? "この課題について" : "on this issue";
     }
-    const targetTitle = stripLeadingIssueKey(title, activity.issueKey);
+    const targetTitle = template_stripLeadingIssueKey(title, activity.issueKey);
     if (targetTitle) {
         return language === "ja" ? `「${targetTitle}」について` : `on "${targetTitle}"`;
     }
@@ -42530,13 +42581,14 @@ function relatedPreviousComment(activity, isConfirmation) {
     return previousComments[previousComments.length - 1];
 }
 function relatedCommentCandidates(activity) {
-    const previousComments = previousCommentContexts(activity);
+    const previousComments = previousCommentContexts(activity).filter((comment) => !template_isLowSignalContextComment(comment.body));
     const currentAuthor = typeof activity.metadata?.author === "string" ? speakerName(activity.metadata.author) : undefined;
     if (!currentAuthor) {
         return previousComments;
     }
-    const nonSelfComments = previousComments.filter((comment) => speakerName(comment.author) !== currentAuthor);
-    return nonSelfComments.length > 0 ? nonSelfComments : previousComments;
+    const currentAuthorKey = template_normalizeSpeakerName(currentAuthor);
+    const nonSelfComments = previousComments.filter((comment) => template_normalizeSpeakerName(speakerName(comment.author)) !== currentAuthorKey);
+    return nonSelfComments;
 }
 function previousCommentContexts(activity) {
     const commentContext = activity.metadata?.commentContext;
@@ -42581,6 +42633,9 @@ function previousCommentSpeakerPrefix(comment, language) {
 function speakerName(author) {
     const name = author?.replace(/^@+/, "").trim();
     return name || undefined;
+}
+function template_normalizeSpeakerName(author) {
+    return author?.replace(/\s+/g, "").trim() ?? "";
 }
 function confirmationRequestTarget(value) {
     const normalized = stripMarkdownBreaks(value).replace(/^@[^\s]+[\s　]+/, "");
@@ -42713,7 +42768,7 @@ function titleSummaryTopic(title, issueKey) {
     return topic;
 }
 function textSummaryTopic(value, issueKey) {
-    const cleaned = stripLeadingIssueKey(stripConventionalCommitPrefix(cleanSummaryText(value)), issueKey);
+    const cleaned = template_stripLeadingIssueKey(stripConventionalCommitPrefix(cleanSummaryText(value)), issueKey);
     return cleaned ? shortSummaryTopic(cleaned) : undefined;
 }
 function statusChangeSummaryTopic(activity, language) {
@@ -42842,7 +42897,7 @@ function mermaidTaskLine(activity, reportDate) {
     return `${title} :${markerPrefix}, ${schedule}`;
 }
 function mermaidTaskTitle(activity) {
-    const title = stripLeadingIssueKey(stripMarkdownBreaks(activity.title), activity.issueKey).slice(0, 80);
+    const title = template_stripLeadingIssueKey(stripMarkdownBreaks(activity.title), activity.issueKey).slice(0, 80);
     return mermaidText(`${activity.issueKey ?? "Unlinked"} ${title}`);
 }
 function mermaidText(value) {
@@ -43065,16 +43120,23 @@ function compactBody(body) {
 function isConfirmationComment(value) {
     return /確認しました|確認済み|確認いたしました|確認完了|confirmed|looks good|lgtm/i.test(stripMarkdownBreaks(value));
 }
+function template_isLowSignalContextComment(value) {
+    const normalized = stripMarkdownBreaks(value)
+        .replace(/^@[^\s　]+[\s　]*/u, "")
+        .replace(/[!！。.\s]+$/gu, "")
+        .trim();
+    return /^(確認しました|確認済みです?|確認いたしました|確認完了|承知しました|了解しました|ok|okay|thanks|thank you|lgtm)$/iu.test(normalized);
+}
 function isResolvedStatus(status) {
     return /done|closed|resolved|completed|処理済み|完了|対応済み|終了|クローズ/i.test(status);
 }
-function stripLeadingIssueKey(title, issueKey) {
+function template_stripLeadingIssueKey(title, issueKey) {
     if (!issueKey) {
         return title;
     }
-    return title.replace(new RegExp(`^${escapeRegExp(issueKey)}[:：\\s-]*`), "").trim();
+    return title.replace(new RegExp(`^${template_escapeRegExp(issueKey)}[:：\\s-]*`), "").trim();
 }
-function escapeRegExp(value) {
+function template_escapeRegExp(value) {
     return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 function stripMarkdownBreaks(value) {

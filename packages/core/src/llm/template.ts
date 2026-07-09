@@ -418,14 +418,17 @@ function relatedPreviousComment(
 }
 
 function relatedCommentCandidates(activity: NormalizedActivity): PreviousCommentContext[] {
-  const previousComments = previousCommentContexts(activity);
+  const previousComments = previousCommentContexts(activity).filter((comment) => !isLowSignalContextComment(comment.body));
   const currentAuthor = typeof activity.metadata?.author === "string" ? speakerName(activity.metadata.author) : undefined;
   if (!currentAuthor) {
     return previousComments;
   }
 
-  const nonSelfComments = previousComments.filter((comment) => speakerName(comment.author) !== currentAuthor);
-  return nonSelfComments.length > 0 ? nonSelfComments : previousComments;
+  const currentAuthorKey = normalizeSpeakerName(currentAuthor);
+  const nonSelfComments = previousComments.filter(
+    (comment) => normalizeSpeakerName(speakerName(comment.author)) !== currentAuthorKey
+  );
+  return nonSelfComments;
 }
 
 function previousCommentContexts(activity: NormalizedActivity): PreviousCommentContext[] {
@@ -481,6 +484,10 @@ function previousCommentSpeakerPrefix(
 function speakerName(author: string | undefined): string | undefined {
   const name = author?.replace(/^@+/, "").trim();
   return name || undefined;
+}
+
+function normalizeSpeakerName(author: string | undefined): string {
+  return author?.replace(/\s+/g, "").trim() ?? "";
 }
 
 function confirmationRequestTarget(value: string): string | undefined {
@@ -1133,6 +1140,17 @@ function compactBody(body: string | undefined): string | undefined {
 function isConfirmationComment(value: string): boolean {
   return /確認しました|確認済み|確認いたしました|確認完了|confirmed|looks good|lgtm/i.test(
     stripMarkdownBreaks(value)
+  );
+}
+
+function isLowSignalContextComment(value: string): boolean {
+  const normalized = stripMarkdownBreaks(value)
+    .replace(/^@[^\s　]+[\s　]*/u, "")
+    .replace(/[!！。.\s]+$/gu, "")
+    .trim();
+
+  return /^(確認しました|確認済みです?|確認いたしました|確認完了|承知しました|了解しました|ok|okay|thanks|thank you|lgtm)$/iu.test(
+    normalized
   );
 }
 

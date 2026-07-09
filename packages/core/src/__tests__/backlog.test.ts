@@ -467,6 +467,96 @@ describe("fetchBacklogActivities", () => {
       }
     ]);
   });
+
+  it("does not create discussion context from low-signal confirmation comments only", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        const url = new URL(String(input));
+
+        if (url.pathname === "/api/v2/users/myself") {
+          return jsonResponse({
+            id: 123,
+            name: "Admin"
+          });
+        }
+
+        if (url.pathname === "/api/v2/projects") {
+          return jsonResponse([
+            {
+              id: 456,
+              projectKey: "APP",
+              name: "App"
+            }
+          ]);
+        }
+
+        if (url.pathname === "/api/v2/issues" && !url.searchParams.has("assigneeId[]")) {
+          return jsonResponse([
+            {
+              id: 789,
+              issueKey: "APP-1",
+              summary: "Target issue",
+              updated: "2026-07-06T10:00:00+09:00",
+              assignee: {
+                id: 123,
+                name: "Admin"
+              }
+            }
+          ]);
+        }
+
+        if (url.pathname === "/api/v2/issues") {
+          return jsonResponse([]);
+        }
+
+        if (url.pathname === "/api/v2/issues/APP-1/comments") {
+          return jsonResponse([
+            {
+              id: 900,
+              content: "@Admin 確認しました！",
+              created: "2026-07-01T09:00:00+09:00",
+              createdUser: {
+                id: 456,
+                name: "Reviewer"
+              }
+            },
+            {
+              id: 901,
+              content: "@Reviewer 先に調査結果を共有しました。",
+              created: "2026-07-02T09:00:00+09:00",
+              createdUser: {
+                id: 123,
+                name: "Admin"
+              }
+            },
+            {
+              id: 902,
+              content: "実装を更新しました。ご確認お願いいたします。",
+              created: "2026-07-06T10:00:00+09:00",
+              createdUser: {
+                id: 123,
+                name: "Admin"
+              }
+            }
+          ]);
+        }
+
+        return jsonResponse({}, 404);
+      })
+    );
+
+    const activities = await fetchBacklogActivities(baseConfig);
+
+    expect(activities).toEqual([
+      expect.objectContaining({
+        kind: "comment",
+        issueKey: "APP-1",
+        body: "実装を更新しました。ご確認お願いいたします。"
+      })
+    ]);
+    expect(activities).not.toEqual(expect.arrayContaining([expect.objectContaining({ kind: "comment_context" })]));
+  });
 });
 
 function jsonResponse(body: unknown, status = 200): Response {
