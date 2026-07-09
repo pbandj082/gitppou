@@ -24,15 +24,34 @@ export async function commitReportIfNeeded({ reportPath, reportDate }: CommitRep
   }
 
   await git(["commit", "-m", `Add daily report ${reportDate}`, "--", reportPath]);
-  await git(["push"]);
+  await pushWithRemoteSync();
+}
+
+async function pushWithRemoteSync(): Promise<void> {
+  await git(["pull", "--rebase", "--autostash"]);
+
+  const firstPushCode = await gitExit(["push"]);
+  if (firstPushCode === 0) {
+    return;
+  }
+
+  await git(["pull", "--rebase", "--autostash"]);
+  const secondPushCode = await gitExit(["push"]);
+  if (secondPushCode !== 0) {
+    throw new Error(`git push failed with exit code ${secondPushCode}.`);
+  }
 }
 
 async function git(args: string[]): Promise<void> {
-  const exitCode = await exec.exec("git", args, {
-    ignoreReturnCode: true
-  });
+  const exitCode = await gitExit(args);
 
   if (exitCode !== 0) {
     throw new Error(`git ${args[0] ?? ""} failed with exit code ${exitCode}.`);
   }
+}
+
+async function gitExit(args: string[]): Promise<number> {
+  return exec.exec("git", args, {
+    ignoreReturnCode: true
+  });
 }

@@ -36296,15 +36296,30 @@ async function commitReportIfNeeded({ reportPath, reportDate }) {
         throw new Error(`git diff failed with exit code ${diffCode}.`);
     }
     await git(["commit", "-m", `Add daily report ${reportDate}`, "--", reportPath]);
-    await git(["push"]);
+    await pushWithRemoteSync();
+}
+async function pushWithRemoteSync() {
+    await git(["pull", "--rebase", "--autostash"]);
+    const firstPushCode = await gitExit(["push"]);
+    if (firstPushCode === 0) {
+        return;
+    }
+    await git(["pull", "--rebase", "--autostash"]);
+    const secondPushCode = await gitExit(["push"]);
+    if (secondPushCode !== 0) {
+        throw new Error(`git push failed with exit code ${secondPushCode}.`);
+    }
 }
 async function git(args) {
-    const exitCode = await _actions_exec__WEBPACK_IMPORTED_MODULE_0__.exec("git", args, {
-        ignoreReturnCode: true
-    });
+    const exitCode = await gitExit(args);
     if (exitCode !== 0) {
         throw new Error(`git ${args[0] ?? ""} failed with exit code ${exitCode}.`);
     }
+}
+async function gitExit(args) {
+    return _actions_exec__WEBPACK_IMPORTED_MODULE_0__.exec("git", args, {
+        ignoreReturnCode: true
+    });
 }
 
 
