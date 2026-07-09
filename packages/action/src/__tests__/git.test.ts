@@ -2,11 +2,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { commitReportIfNeeded, syncReportBranchBeforeWrite } from "../git.js";
 
 const { execMock } = vi.hoisted(() => ({
-  execMock: vi.fn()
+  execMock: vi.fn(),
 }));
 
 vi.mock("@actions/exec", () => ({
-  exec: execMock
+  exec: execMock,
 }));
 
 beforeEach(() => {
@@ -32,18 +32,40 @@ describe("commitReportIfNeeded", () => {
     });
 
     await commitReportIfNeeded({
-      reportPath: ".gitppou/reports/2026-07/2026-07-08.md",
-      reportDate: "2026-07-08"
+      reportPaths: [
+        ".gitppou/reports/2026-07/2026-07-08.md",
+        ".gitppou/site/2026-07/2026-07-08.html",
+      ],
+      reportDate: "2026-07-08",
     });
 
     expect(gitArgs()).toEqual([
       ["config", "user.name", "gitppou[bot]"],
       ["config", "user.email", "gitppou[bot]@users.noreply.github.com"],
-      ["add", "--", ".gitppou/reports/2026-07/2026-07-08.md"],
-      ["diff", "--cached", "--quiet", "--", ".gitppou/reports/2026-07/2026-07-08.md"],
-      ["commit", "-m", "Add daily report 2026-07-08", "--", ".gitppou/reports/2026-07/2026-07-08.md"],
+      [
+        "add",
+        "--",
+        ".gitppou/reports/2026-07/2026-07-08.md",
+        ".gitppou/site/2026-07/2026-07-08.html",
+      ],
+      [
+        "diff",
+        "--cached",
+        "--quiet",
+        "--",
+        ".gitppou/reports/2026-07/2026-07-08.md",
+        ".gitppou/site/2026-07/2026-07-08.html",
+      ],
+      [
+        "commit",
+        "-m",
+        "Add daily report 2026-07-08",
+        "--",
+        ".gitppou/reports/2026-07/2026-07-08.md",
+        ".gitppou/site/2026-07/2026-07-08.html",
+      ],
       ["pull", "--rebase", "--autostash"],
-      ["push"]
+      ["push"],
     ]);
   });
 
@@ -63,8 +85,8 @@ describe("commitReportIfNeeded", () => {
     });
 
     await commitReportIfNeeded({
-      reportPath: ".gitppou/reports/2026-07/2026-07-08.md",
-      reportDate: "2026-07-08"
+      reportPaths: [".gitppou/reports/2026-07/2026-07-08.md"],
+      reportDate: "2026-07-08",
     });
 
     expect(gitArgs().filter((args) => args[0] === "pull")).toHaveLength(2);
@@ -81,8 +103,8 @@ describe("commitReportIfNeeded", () => {
     });
 
     await commitReportIfNeeded({
-      reportPath: ".gitppou/reports/2026-07/2026-07-08.md",
-      reportDate: "2026-07-08"
+      reportPaths: [".gitppou/reports/2026-07/2026-07-08.md"],
+      reportDate: "2026-07-08",
     });
 
     expect(gitArgs().some((args) => args[0] === "pull")).toBe(false);

@@ -1,6 +1,6 @@
 # Gitppou
 
-Gitppou generates engineer daily reports from GitHub activity and Backlog progress, then can notify Slack and optionally commit the generated Markdown report back to the repository.
+Gitppou generates engineer daily reports from GitHub activity and Backlog progress, then can notify Slack and optionally commit the generated Markdown or HTML report back to the repository.
 
 The name means **Git + nippou**. `nippou` means daily report in Japanese.
 
@@ -62,6 +62,10 @@ report:
   language: en
   timezone: Asia/Tokyo
   dir: reports
+  formats:
+    - markdown
+    # - html
+  # htmlDir: .gitppou/site
 
 llm:
   provider: github-models
@@ -74,7 +78,7 @@ git:
   commitReport: true
 ```
 
-The generated report path is:
+The generated Markdown report path is:
 
 ```text
 reports/YYYY-MM/YYYY-MM-DD.md
@@ -85,6 +89,24 @@ Example:
 ```text
 reports/2026-07/2026-07-03.md
 ```
+
+To also save a rendered HTML report:
+
+```yaml
+report:
+  formats:
+    - markdown
+    - html
+  htmlDir: .gitppou/site
+```
+
+The HTML report path is:
+
+```text
+.gitppou/site/YYYY-MM/YYYY-MM-DD.html
+```
+
+When HTML output is enabled, Slack links and the `report-path` action output point to the HTML file. `report-paths` contains every generated file path.
 
 ## Required Permissions
 
@@ -157,20 +179,20 @@ GitHub does not allow custom repository secret names that start with `GITHUB_`. 
 
 ## Inputs
 
-| Input | Default | Description |
-| --- | --- | --- |
+| Input    | Default       | Description                                                                              |
+| -------- | ------------- | ---------------------------------------------------------------------------------------- |
 | `config` | `gitppou.yml` | Path to the Gitppou YAML or JSON config file. Run `actions/checkout` before this action. |
 
 ## Environment Variables
 
 Secrets must be passed via `env`, not `with`.
 
-| Variable | Required | Description |
-| --- | --- | --- |
-| Default GitHub token env var | Yes | Environment variable named by `github.tokenEnv`; `GITHUB_TOKEN` by default. Used for activity collection fallback and GitHub Models. |
-| Owner-specific GitHub token env vars | Only for mapped owners | Additional tokens referenced by `github.tokens`. |
-| `BACKLOG_API_KEY` | Yes | Backlog API key. |
-| `SLACK_WEBHOOK_URL` | Only for Slack | Slack Incoming Webhook URL. |
+| Variable                             | Required               | Description                                                                                                                          |
+| ------------------------------------ | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| Default GitHub token env var         | Yes                    | Environment variable named by `github.tokenEnv`; `GITHUB_TOKEN` by default. Used for activity collection fallback and GitHub Models. |
+| Owner-specific GitHub token env vars | Only for mapped owners | Additional tokens referenced by `github.tokens`.                                                                                     |
+| `BACKLOG_API_KEY`                    | Yes                    | Backlog API key.                                                                                                                     |
+| `SLACK_WEBHOOK_URL`                  | Only for Slack         | Slack Incoming Webhook URL.                                                                                                          |
 
 Do not hard-code these values. Store them in GitHub Actions Secrets.
 
@@ -284,7 +306,7 @@ APP-123 Fix login validation
 Issue keys use this pattern:
 
 ```ts
-/[A-Z][A-Z0-9_]+-\d+/g
+/[A-Z][A-Z0-9_]+-\d+/g;
 ```
 
 When `backlog.spaces.*.projectKeys` is set, detected issue keys are restricted to those projects.
@@ -300,18 +322,37 @@ env:
   SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
 ```
 
-Slack receives a short prose summary, not the full raw activity. With `llm.provider: github-models`, the Slack summary is generated from the final report; otherwise Gitppou falls back to a local heading-based summary. When running in GitHub Actions, the summary includes the actor, workflow, repository/ref, and a link to the generated report file in the repository. Slack failures are warnings in v1 and do not fail the action.
+Slack receives a short prose summary, not the full raw activity. With `llm.provider: github-models`, the Slack summary is generated from the final report; otherwise Gitppou falls back to a local heading-based summary. When running in GitHub Actions, the summary includes the actor, workflow, repository/ref, and a link to the generated report file in the repository. If HTML output is enabled, that link points to the HTML report. Slack failures are warnings in v1 and do not fail the action.
+
+## HTML Reports
+
+HTML output is optional. It renders the same Markdown report into a standalone HTML file with GitHub-flavored Markdown styling and Mermaid support. Raw HTML in the report body is escaped.
+
+Use `report.formats` to choose saved files:
+
+```yaml
+report:
+  formats:
+    - markdown
+    - html
+  dir: reports
+  htmlDir: .gitppou/site
+```
+
+This keeps the source Markdown in `reports/` and the distributable HTML in `.gitppou/site/`. If you later enable GitHub Pages, use a Pages workflow to upload `htmlDir` as the Pages artifact, or choose `docs` as `htmlDir` when using branch-based Pages publishing.
 
 ## Commit Behavior
 
 When `git.commitReport: true`, Gitppou:
 
 1. Configures git user as `gitppou[bot]`.
-2. Adds the generated report file.
+2. Adds the generated report file or files.
 3. Commits with `Add daily report YYYY-MM-DD`.
 4. Pushes the branch.
 
 If there are no report changes, the commit is skipped. If commit or push fails while `git.commitReport: true`, the action fails.
+
+Make sure the configured output directories are not ignored by `.gitignore` in the report repository. Gitppou uses normal `git add`, so ignored report files will not be committed.
 
 Committing reports to public repositories is not recommended. Private repositories are recommended for storing daily reports.
 

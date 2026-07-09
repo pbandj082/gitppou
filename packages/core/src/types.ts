@@ -2,6 +2,7 @@ export type ReportLanguage = "en" | "ja";
 export type LlmProviderName = "template" | "github-models";
 export type LlmStyle = "concise" | "detailed";
 export type GitHubRepoSort = "created" | "updated" | "pushed" | "full_name";
+export type ReportFormat = "markdown" | "html";
 
 export type GitHubRepoOwnerSpec = {
   owner: string;
@@ -38,6 +39,8 @@ export type GitppouConfig = {
   reportTimezone: string;
   reportLanguage: ReportLanguage;
   reportDir: string;
+  reportFormats: ReportFormat[];
+  reportHtmlDir: string;
 
   commitReport: boolean;
   slackNotify: boolean;
@@ -98,6 +101,8 @@ export type ActivityGroup = {
 
 export type ReportResult = {
   reportPath: string;
+  reportHtmlPath?: string;
+  reportPaths: string[];
   reportMarkdown: string;
   slackSummary: string;
 };

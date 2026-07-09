@@ -12,12 +12,14 @@ const baseConfig: GitppouConfig = {
   reportTimezone: "Asia/Tokyo",
   reportLanguage: "ja",
   reportDir: "reports",
+  reportFormats: ["markdown"],
+  reportHtmlDir: ".gitppou/site",
   commitReport: false,
   slackNotify: true,
   llmProvider: "template",
   llmModel: "openai/gpt-4o-mini",
   llmMaxInputChars: 20_000,
-  llmStyle: "concise"
+  llmStyle: "concise",
 };
 
 describe("generateSlackSummary", () => {
@@ -33,8 +35,8 @@ describe("generateSlackSummary", () => {
           runId: "123456789",
           runNumber: "42",
           serverUrl: "https://github.com",
-          workflow: "Daily Report"
-        }
+          workflow: "Daily Report",
+        },
       },
       ".gitppou/reports/2026-07/2026-07-06.md",
       [
@@ -48,17 +50,21 @@ describe("generateSlackSummary", () => {
         "",
         "## 明日やること",
         "",
-        "- APP-1 Login flow: ステータス: 処理中"
+        "- APP-1 Login flow: ステータス: 処理中",
       ].join("\n"),
-      "ログイン導線の修正を進め、PR更新と明日の確認事項を整理しました。"
+      "ログイン導線の修正を進め、PR更新と明日の確認事項を整理しました。",
     );
 
     expect(summary).toContain("日報 2026-07-06");
-    expect(summary).toContain("by octocat / Daily Report #42 / owner/repo (main)");
     expect(summary).toContain(
-      "詳細: <https://github.com/owner/repo/blob/main/.gitppou/reports/2026-07/2026-07-06.md|.gitppou/reports/2026-07/2026-07-06.md>"
+      "by octocat / Daily Report #42 / owner/repo (main)",
     );
-    expect(summary).toContain("ログイン導線の修正を進め、PR更新と明日の確認事項を整理しました。");
+    expect(summary).toContain(
+      "詳細: <https://github.com/owner/repo/blob/main/.gitppou/reports/2026-07/2026-07-06.md|.gitppou/reports/2026-07/2026-07-06.md>",
+    );
+    expect(summary).toContain(
+      "ログイン導線の修正を進め、PR更新と明日の確認事項を整理しました。",
+    );
     expect(summary).not.toContain("- APP-1 Login flow");
     expect(summary).not.toContain("actions/runs/123456789");
     expect(summary).not.toContain("課題・相談:");
@@ -79,8 +85,8 @@ describe("generateSlackSummary", () => {
         "",
         "## 明日やること",
         "",
-        "- APP-1 Login flow: ステータス: 処理中"
-      ].join("\n")
+        "- APP-1 Login flow: ステータス: 処理中",
+      ].join("\n"),
     );
 
     expect(summary).toContain("本日はAPP-1 Login flowを中心に対応しました。");

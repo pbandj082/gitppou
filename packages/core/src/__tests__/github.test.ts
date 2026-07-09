@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fetchGitHubActivities, parseGitHubRepoSpecString, resolveGitHubTokenForOwner } from "../github.js";
+import {
+  fetchGitHubActivities,
+  parseGitHubRepoSpecString,
+  resolveGitHubTokenForOwner,
+} from "../github.js";
 import type { GitppouConfig } from "../types.js";
 
 const baseConfig: GitppouConfig = {
@@ -10,19 +14,21 @@ const baseConfig: GitppouConfig = {
   backlogSpaces: [
     {
       space: "example",
-      projectKeys: []
-    }
+      projectKeys: [],
+    },
   ],
   reportDate: "2026-07-06",
   reportTimezone: "Asia/Tokyo",
   reportLanguage: "en",
   reportDir: "reports",
+  reportFormats: ["markdown"],
+  reportHtmlDir: ".gitppou/site",
   commitReport: false,
   slackNotify: false,
   llmProvider: "template",
   llmModel: "openai/gpt-4o-mini",
   llmMaxInputChars: 20_000,
-  llmStyle: "concise"
+  llmStyle: "concise",
 };
 
 afterEach(() => {
@@ -36,11 +42,11 @@ describe("resolveGitHubTokenForOwner", () => {
         {
           ...baseConfig,
           githubTokensByOwner: {
-            "org-a": "org-a-token"
-          }
+            "org-a": "org-a-token",
+          },
         },
-        "org-a"
-      )
+        "org-a",
+      ),
     ).toBe("org-a-token");
   });
 
@@ -50,16 +56,18 @@ describe("resolveGitHubTokenForOwner", () => {
         {
           ...baseConfig,
           githubTokensByOwner: {
-            "Org-A": "org-a-token"
-          }
+            "Org-A": "org-a-token",
+          },
         },
-        "org-a"
-      )
+        "org-a",
+      ),
     ).toBe("org-a-token");
   });
 
   it("falls back to the default token", () => {
-    expect(resolveGitHubTokenForOwner(baseConfig, "org-a")).toBe("default-token");
+    expect(resolveGitHubTokenForOwner(baseConfig, "org-a")).toBe(
+      "default-token",
+    );
   });
 });
 
@@ -80,7 +88,11 @@ describe("fetchGitHubActivities", () => {
 
         if (url.pathname === "/search/issues") {
           const query = url.searchParams.get("q") ?? "";
-          if (query.includes("is:pr") && query.includes("involves:octocat") && query.includes("updated:2026-07-06")) {
+          if (
+            query.includes("is:pr") &&
+            query.includes("involves:octocat") &&
+            query.includes("updated:2026-07-06")
+          ) {
             return jsonResponse({
               total_count: 1,
               incomplete_results: false,
@@ -94,17 +106,17 @@ describe("fetchGitHubActivities", () => {
                   updated_at: "2026-07-06T10:00:00Z",
                   body: "APP-1",
                   user: {
-                    login: "octocat"
-                  }
-                }
-              ]
+                    login: "octocat",
+                  },
+                },
+              ],
             });
           }
 
           return jsonResponse({
             total_count: 0,
             incomplete_results: false,
-            items: []
+            items: [],
           });
         }
 
@@ -114,11 +126,11 @@ describe("fetchGitHubActivities", () => {
             deletions: 32,
             changed_files: 4,
             head: {
-              ref: "feature/APP-1-login"
+              ref: "feature/APP-1-login",
             },
             base: {
-              ref: "main"
-            }
+              ref: "main",
+            },
           });
         }
 
@@ -127,14 +139,14 @@ describe("fetchGitHubActivities", () => {
         }
 
         return jsonResponse({}, 404);
-      })
+      }),
     );
 
     await expect(
       fetchGitHubActivities({
         ...baseConfig,
-        githubRepos: ["owner/repo"]
-      })
+        githubRepos: ["owner/repo"],
+      }),
     ).resolves.toEqual([
       expect.objectContaining({
         kind: "pull_request",
@@ -143,9 +155,9 @@ describe("fetchGitHubActivities", () => {
           deletions: 32,
           changedFiles: 4,
           branch: "feature/APP-1-login",
-          baseBranch: "main"
-        })
-      })
+          baseBranch: "main",
+        }),
+      }),
     ]);
   });
 
@@ -165,7 +177,11 @@ describe("fetchGitHubActivities", () => {
 
         if (url.pathname === "/search/issues") {
           const query = url.searchParams.get("q") ?? "";
-          if (query.includes("is:pr") && query.includes("involves:octocat") && query.includes("updated:2026-07-06")) {
+          if (
+            query.includes("is:pr") &&
+            query.includes("involves:octocat") &&
+            query.includes("updated:2026-07-06")
+          ) {
             return jsonResponse({
               total_count: 1,
               incomplete_results: false,
@@ -181,17 +197,17 @@ describe("fetchGitHubActivities", () => {
                   updated_at: "2026-07-06T10:00:00Z",
                   body: "APP-1",
                   user: {
-                    login: "octocat"
-                  }
-                }
-              ]
+                    login: "octocat",
+                  },
+                },
+              ],
             });
           }
 
           return jsonResponse({
             total_count: 0,
             incomplete_results: false,
-            items: []
+            items: [],
           });
         }
 
@@ -201,11 +217,11 @@ describe("fetchGitHubActivities", () => {
             deletions: 32,
             changed_files: 4,
             head: {
-              ref: "feature/APP-1-login"
+              ref: "feature/APP-1-login",
             },
             base: {
-              ref: "main"
-            }
+              ref: "main",
+            },
           });
         }
 
@@ -215,44 +231,44 @@ describe("fetchGitHubActivities", () => {
               sha: "abc123456789",
               html_url: "https://github.com/owner/repo/commit/abc123456789",
               author: {
-                login: "octocat"
+                login: "octocat",
               },
               commit: {
                 message: "implement branch-only change",
                 author: {
-                  date: "2026-07-06T10:00:00Z"
-                }
-              }
+                  date: "2026-07-06T10:00:00Z",
+                },
+              },
             },
             {
               sha: "def123456789",
               html_url: "https://github.com/owner/repo/commit/def123456789",
               author: {
-                login: "someone-else"
+                login: "someone-else",
               },
               commit: {
                 message: "ignore another author",
                 author: {
-                  date: "2026-07-06T10:00:00Z"
-                }
-              }
-            }
+                  date: "2026-07-06T10:00:00Z",
+                },
+              },
+            },
           ]);
         }
 
         return jsonResponse({}, 404);
-      })
+      }),
     );
 
     await expect(
       fetchGitHubActivities({
         ...baseConfig,
-        githubRepos: ["owner/repo"]
-      })
+        githubRepos: ["owner/repo"],
+      }),
     ).resolves.toEqual([
       expect.objectContaining({
         kind: "pull_request",
-        title: "APP-1 Update login flow"
+        title: "APP-1 Update login flow",
       }),
       expect.objectContaining({
         kind: "commit",
@@ -262,9 +278,9 @@ describe("fetchGitHubActivities", () => {
           branch: "feature/APP-1-login",
           pullRequestNumber: 12,
           pullRequestTitle: "APP-1 Update login flow",
-          pullRequestUrl: "https://github.com/owner/repo/pull/12"
-        })
-      })
+          pullRequestUrl: "https://github.com/owner/repo/pull/12",
+        }),
+      }),
     ]);
   });
 
@@ -282,10 +298,10 @@ describe("fetchGitHubActivities", () => {
               commit: {
                 message: "refine report output",
                 author: {
-                  date: "2026-07-06T10:00:00Z"
-                }
-              }
-            }
+                  date: "2026-07-06T10:00:00Z",
+                },
+              },
+            },
           ]);
         }
 
@@ -296,9 +312,9 @@ describe("fetchGitHubActivities", () => {
               title: "Feature app 1",
               html_url: "https://github.com/owner/repo/pull/12",
               head: {
-                ref: "feature/APP-1-login"
-              }
-            }
+                ref: "feature/APP-1-login",
+              },
+            },
           ]);
         }
 
@@ -310,19 +326,19 @@ describe("fetchGitHubActivities", () => {
           return jsonResponse({
             total_count: 0,
             incomplete_results: false,
-            items: []
+            items: [],
           });
         }
 
         return jsonResponse({}, 404);
-      })
+      }),
     );
 
     await expect(
       fetchGitHubActivities({
         ...baseConfig,
-        githubRepos: ["owner/repo"]
-      })
+        githubRepos: ["owner/repo"],
+      }),
     ).resolves.toEqual([
       expect.objectContaining({
         kind: "commit",
@@ -330,9 +346,9 @@ describe("fetchGitHubActivities", () => {
           branch: "feature/APP-1-login",
           pullRequestNumber: 12,
           pullRequestTitle: "Feature app 1",
-          pullRequestUrl: "https://github.com/owner/repo/pull/12"
-        })
-      })
+          pullRequestUrl: "https://github.com/owner/repo/pull/12",
+        }),
+      }),
     ]);
   });
 });
@@ -341,11 +357,11 @@ function jsonResponse(body: unknown, status = 200): Response {
   const response = new Response(JSON.stringify(body), {
     status,
     headers: {
-      "Content-Type": "application/json"
-    }
+      "Content-Type": "application/json",
+    },
   });
   Object.defineProperty(response, "url", {
-    value: "https://api.github.com/"
+    value: "https://api.github.com/",
   });
   return response;
 }
@@ -359,24 +375,26 @@ describe("parseGitHubRepoSpecString", () => {
     expect(parseGitHubRepoSpecString("org-a:20:pushed")).toEqual({
       owner: "org-a",
       limit: 20,
-      sort: "pushed"
+      sort: "pushed",
     });
   });
 
   it("parses owner selector entries with sort only", () => {
     expect(parseGitHubRepoSpecString("org-a:pushed")).toEqual({
       owner: "org-a",
-      sort: "pushed"
+      sort: "pushed",
     });
   });
 
   it("rejects owner selector limits above the supported maximum", () => {
     expect(() => parseGitHubRepoSpecString("org-a:101:pushed")).toThrow(
-      "github.repos owner selector limit must be less than or equal to 100."
+      "github.repos owner selector limit must be less than or equal to 100.",
     );
   });
 
   it("rejects owner selector names that are not GitHub logins", () => {
-    expect(() => parseGitHubRepoSpecString("gaia_crypto:20:pushed")).toThrow("not underscores");
+    expect(() => parseGitHubRepoSpecString("gaia_crypto:20:pushed")).toThrow(
+      "not underscores",
+    );
   });
 });
