@@ -52,6 +52,7 @@ describe("readActionConfig", () => {
   it("uses the original workflow run creation date when report date is omitted in GitHub Actions", async () => {
     inputs.set("config", "src/__tests__/fixtures/gitppou-without-date.yml");
     process.env.GITHUB_ACTIONS = "true";
+    process.env.GITHUB_RUN_ATTEMPT = "1";
     process.env.GITHUB_API_URL = "https://api.github.com";
     process.env.GITHUB_REPOSITORY = "owner/report-repo";
     process.env.GITHUB_RUN_ID = "123456";
@@ -73,6 +74,53 @@ describe("readActionConfig", () => {
           Authorization: "Bearer github-token"
         })
       })
+    );
+  });
+
+  it("tries the repository owner token when the default token cannot read workflow runs", async () => {
+    inputs.set("config", "src/__tests__/fixtures/gitppou-without-date-owner-token.yml");
+    process.env.GITHUB_ACTIONS = "true";
+    process.env.GITHUB_RUN_ATTEMPT = "2";
+    process.env.GITHUB_API_URL = "https://api.github.com";
+    process.env.GITHUB_REPOSITORY = "owner/report-repo";
+    process.env.GITHUB_RUN_ID = "123456";
+    process.env.GITHUB_TOKEN = "github-token";
+    process.env.OWNER_TOKEN = "owner-token";
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response("", { status: 403 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ created_at: "2026-07-07T15:30:00Z" }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const config = await readActionConfig(process.env, new Date("2026-07-09T00:00:00Z"));
+
+    expect(config.reportDate).toBe("2026-07-08");
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "https://api.github.com/repos/owner/report-repo/actions/runs/123456",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: "Bearer owner-token"
+        })
+      })
+    );
+  });
+
+  it("rejects reruns when the original workflow run date cannot be resolved", async () => {
+    inputs.set("config", "src/__tests__/fixtures/gitppou-without-date.yml");
+    process.env.GITHUB_ACTIONS = "true";
+    process.env.GITHUB_RUN_ATTEMPT = "2";
+    process.env.GITHUB_API_URL = "https://api.github.com";
+    process.env.GITHUB_REPOSITORY = "owner/report-repo";
+    process.env.GITHUB_RUN_ID = "123456";
+    process.env.GITHUB_TOKEN = "github-token";
+
+    const fetchMock = vi.fn().mockResolvedValue(new Response("", { status: 403 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(readActionConfig(process.env, new Date("2026-07-09T00:00:00Z"))).rejects.toThrow(
+      "Refusing to use current runner time for a workflow rerun"
     );
   });
 

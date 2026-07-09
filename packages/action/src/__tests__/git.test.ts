@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { commitReportIfNeeded } from "../git.js";
+import { commitReportIfNeeded, syncReportBranchBeforeWrite } from "../git.js";
 
 const { execMock } = vi.hoisted(() => ({
   execMock: vi.fn()
@@ -14,6 +14,14 @@ beforeEach(() => {
 });
 
 describe("commitReportIfNeeded", () => {
+  it("fast-forwards the branch before the report file is written", async () => {
+    execMock.mockResolvedValue(0);
+
+    await syncReportBranchBeforeWrite();
+
+    expect(gitArgs()).toEqual([["pull", "--ff-only"]]);
+  });
+
   it("rebases onto the remote branch before pushing the report commit", async () => {
     execMock.mockImplementation(async (_command: string, args: string[]) => {
       if (args[0] === "diff") {

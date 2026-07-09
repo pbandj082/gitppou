@@ -1,11 +1,15 @@
 import * as core from "@actions/core";
 import { generateDailyReport, sendSlackNotification } from "@gitppou/core";
 import { readActionConfig } from "./config.js";
-import { commitReportIfNeeded } from "./git.js";
+import { commitReportIfNeeded, syncReportBranchBeforeWrite } from "./git.js";
 
 async function main(): Promise<void> {
   try {
     const config = await readActionConfig();
+    if (config.commitReport) {
+      await syncReportBranchBeforeWrite();
+    }
+
     const sendSlackAfterCommit = config.commitReport && config.slackNotify;
     const result = await generateDailyReport(
       sendSlackAfterCommit
