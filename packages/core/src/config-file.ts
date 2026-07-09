@@ -11,6 +11,7 @@ import {
   resolveReportDate,
 } from "./config.js";
 import type {
+  BacklogDocumentConfig,
   BacklogSpaceConfig,
   GitHubActionsContext,
   GitHubRepoOwnerSpec,
@@ -54,6 +55,12 @@ export function buildGitppouConfig(
   const slack = getSection(root, "slack");
   const git = getSection(root, "git");
   const githubTokensByOwner = resolveGitHubTokensByOwner(github, env);
+  const configuredBacklogSpaces =
+    backlog.spaces === undefined ? [] : parseBacklogSpaces(backlog.spaces);
+  const backlogDocument = resolveBacklogDocument(
+    backlog,
+    configuredBacklogSpaces,
+  );
 
   const reportTimezone =
     options.reportTimezone ??
@@ -76,7 +83,7 @@ export function buildGitppouConfig(
     true;
   const backlogEnabled =
     getOptionalBoolean(backlog, "enabled", "config.backlog.enabled") ??
-    hasBacklogSection;
+    shouldEnableBacklogActivities(hasBacklogSection, backlog);
 
   const config: GitppouConfig = {
     githubToken: requiredEnv(
@@ -89,7 +96,9 @@ export function buildGitppouConfig(
       "config.github.username",
     ),
     githubRepos: getGitHubRepoSpecs(github, "repos", "config.github.repos"),
-    backlogSpaces: backlogEnabled ? resolveBacklogSpaces(backlog) : [],
+    backlogSpaces: backlogEnabled
+      ? resolveBacklogSpaces(backlog, configuredBacklogSpaces)
+      : [],
     reportDate,
     reportTimezone,
     reportLanguage: parseReportLanguage(
@@ -132,9 +141,15 @@ export function buildGitppouConfig(
     config.githubTokensByOwner = githubTokensByOwner;
   }
 
-  if (backlogEnabled) {
-    config.backlogApiKey = requiredEnv(env, "BACKLOG_API_KEY");
+  if (backlogDocument) {
+    config.backlogDocument = backlogDocument;
+  }
 
+  if (backlogEnabled || backlogDocument) {
+    config.backlogApiKey = requiredEnv(env, "BACKLOG_API_KEY");
+  }
+
+  if (backlogEnabled) {
     const backlogUserId = getString(backlog, "userId", "config.backlog.userId");
     if (backlogUserId) {
       config.backlogUserId = normalizeBacklogUserId(
@@ -179,6 +194,18 @@ function parseReportFormat(value: string, pathLabel: string): ReportFormat {
   }
 
   throw new Error(`${pathLabel} must contain only markdown, html, or pdf.`);
+}
+
+function shouldEnableBacklogActivities(
+  hasBacklogSection: boolean,
+  backlog: RawObject,
+): boolean {
+  if (!hasBacklogSection) {
+    return false;
+  }
+
+  const keys = Object.keys(backlog);
+  return keys.length === 0 || keys.some((key) => key !== "document");
 }
 
 function getSection(root: RawObject, key: string): RawObject {
@@ -472,7 +499,10 @@ function getOptionalBoolean(
   return value;
 }
 
-function resolveBacklogSpaces(backlog: RawObject): BacklogSpaceConfig[] {
+function resolveBacklogSpaces(
+  backlog: RawObject,
+  configuredBacklogSpaces: BacklogSpaceConfig[],
+): BacklogSpaceConfig[] {
   if (
     backlog.space !== undefined ||
     backlog.projectKeys !== undefined ||
@@ -487,7 +517,7 @@ function resolveBacklogSpaces(backlog: RawObject): BacklogSpaceConfig[] {
     throw new Error("config.backlog.spaces is required.");
   }
 
-  return parseBacklogSpaces(backlog.spaces);
+  return configuredBacklogSpaces;
 }
 
 function parseBacklogSpaces(value: unknown): BacklogSpaceConfig[] {
@@ -538,6 +568,113 @@ function parseBacklogSpaceConfig(
   }
 
   return config;
+}
+
+function resolveBacklogDocument(
+  backlog: RawObject,
+  configuredBacklogSpaces: BacklogSpaceConfig[],
+): BacklogDocumentConfig | undefined {
+  if (backlog.document === undefined) {
+    return undefined;
+  }
+
+  const section = asObject(backlog.document, "config.backlog.document");
+  const enabled =
+    getOptionalBoolean(section, "enabled", "config.backlog.document.enabled") ??
+    true;
+  if (!enabled) {
+    return undefined;
+  }
+
+  const space =
+    getString(section, "space", "config.backlog.document.space") ??
+    inferBacklogDocumentSpace(configuredBacklogSpaces);
+  const matchedSpace = configuredBacklogSpaces.find(
+    (spaceConfig) => spaceConfig.space === space,
+  );
+  const host =
+    getString(section, "host", "config.backlog.document.host") ??
+    matchedSpace?.host;
+  const projectId = getOptionalPositiveInteger(
+    section,
+    "projectId",
+    "config.backlog.document.projectId",
+  );
+  const projectKey = getString(
+    section,
+    "projectKey",
+    "config.backlog.document.projectKey",
+  );
+
+  if (projectId === undefined && !projectKey) {
+    throw new Error(
+      "config.backlog.document.projectId or config.backlog.document.projectKey is required.",
+    );
+  }
+
+  if (projectId !== undefined && projectKey) {
+    throw new Error(
+      "Specify only one of config.backlog.document.projectId or config.backlog.document.projectKey.",
+    );
+  }
+
+  const config: BacklogDocumentConfig = {
+    space,
+  };
+
+  if (host) {
+    config.host = normalizeBacklogHost(host, "config.backlog.document.host");
+  }
+
+  if (projectId !== undefined) {
+    config.projectId = projectId;
+  }
+
+  if (projectKey) {
+    config.projectKey = projectKey;
+  }
+
+  const parentId = getString(
+    section,
+    "parentId",
+    "config.backlog.document.parentId",
+  );
+  if (parentId) {
+    config.parentId = parentId;
+  }
+
+  const title = getString(section, "title", "config.backlog.document.title");
+  if (title) {
+    config.title = title;
+  }
+
+  const emoji = getString(section, "emoji", "config.backlog.document.emoji");
+  if (emoji) {
+    config.emoji = emoji;
+  }
+
+  const addLast = getOptionalBoolean(
+    section,
+    "addLast",
+    "config.backlog.document.addLast",
+  );
+  if (addLast !== undefined) {
+    config.addLast = addLast;
+  }
+
+  return config;
+}
+
+function inferBacklogDocumentSpace(
+  configuredBacklogSpaces: BacklogSpaceConfig[],
+): string {
+  if (configuredBacklogSpaces.length === 1) {
+    return configuredBacklogSpaces[0]?.space ?? "";
+  }
+
+  throw new Error(
+    "config.backlog.document.space is required unless exactly one config.backlog.spaces entry is configured.",
+  );
 }
 
 function normalizeBacklogHost(value: string, pathLabel: string): string {

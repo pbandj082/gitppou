@@ -57,6 +57,12 @@ backlog:
       # host: your-space.backlog.jp
       projectKeys:
         - APP
+  # Optional: publish the generated Markdown report as a Backlog document.
+  # document:
+  #   space: your-space
+  #   projectKey: APP
+  #   parentId: "parent-document-id"
+  #   title: "Daily Report {{date}}"
 
 report:
   language: en
@@ -255,6 +261,26 @@ backlog:
       projectKeys:
         - OPS
 ```
+
+To also publish the generated Markdown report as a Backlog document:
+
+```yaml
+backlog:
+  spaces:
+    your-space:
+      projectKeys:
+        - APP
+  document:
+    enabled: true
+    space: your-space
+    projectKey: APP
+    # Backlog document parent ID. Omit to create at the project document root.
+    parentId: "parent-document-id"
+    title: "Daily Report {{date}}"
+    addLast: true
+```
+
+`backlog.document.projectKey` is resolved to a numeric project ID through Backlog `/projects`. You can use `projectId` instead to skip that lookup. `parentId` is the parent Backlog document ID used as the destination folder in the document tree; you can look up candidate IDs from Backlog's document tree API. When `git.commitReport: true` in GitHub Actions, Gitppou creates the Backlog document after the report commit succeeds.
 
 Omit Backlog or disable it to generate a GitHub-only report:
 

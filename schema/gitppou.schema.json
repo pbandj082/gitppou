@@ -72,6 +72,37 @@
       "properties": {
         "enabled": { "type": "boolean" },
         "userId": { "type": "string", "pattern": "^\\d+$" },
+        "document": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "space": { "type": "string" },
+            "host": { "type": "string", "pattern": "^(https?://)?[^/?]+/?$" },
+            "projectId": { "type": "integer", "minimum": 1 },
+            "projectKey": { "type": "string" },
+            "parentId": { "type": "string" },
+            "title": { "type": "string" },
+            "emoji": { "type": "string" },
+            "addLast": { "type": "boolean" }
+          },
+          "anyOf": [
+            {
+              "required": ["projectId"],
+              "not": { "required": ["projectKey"] }
+            },
+            {
+              "required": ["projectKey"],
+              "not": { "required": ["projectId"] }
+            },
+            {
+              "required": ["enabled"],
+              "properties": {
+                "enabled": { "const": false }
+              }
+            }
+          ]
+        },
         "spaces": {
           "type": "object",
           "minProperties": 1,

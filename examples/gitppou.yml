@@ -26,6 +26,17 @@ backlog:
     # other-space:
     #   projectKeys:
     #     - OPS
+  # Optional: publish the generated Markdown report as a Backlog document.
+  # document:
+  #   enabled: true
+  #   # Required when multiple spaces are configured.
+  #   space: your-space
+  #   # Use projectKey or projectId. projectKey is resolved through /projects.
+  #   projectKey: APP
+  #   # Backlog document parent ID. Omit to create at the project document root.
+  #   parentId: "parent-document-id"
+  #   title: "Daily Report {{date}}"
+  #   addLast: true
 
 report:
   language: en
