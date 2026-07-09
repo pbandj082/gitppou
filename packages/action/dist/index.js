@@ -36393,9 +36393,10 @@ __nccwpck_require__.a(__webpack_module__, async (__webpack_handle_async_dependen
 
 async function main() {
     try {
-        const config = await (0,_config_js__WEBPACK_IMPORTED_MODULE_2__/* .readActionConfig */ .P)();
+        let config = await (0,_config_js__WEBPACK_IMPORTED_MODULE_2__/* .readActionConfig */ .P)();
         if (config.commitReport) {
             await (0,_git_js__WEBPACK_IMPORTED_MODULE_3__/* .syncReportBranchBeforeWrite */ .I)();
+            config = await (0,_config_js__WEBPACK_IMPORTED_MODULE_2__/* .readActionConfig */ .P)();
         }
         const sendSlackAfterCommit = config.commitReport && config.slackNotify;
         const result = await (0,_gitppou_core__WEBPACK_IMPORTED_MODULE_1__/* .generateDailyReport */ .jl)(sendSlackAfterCommit

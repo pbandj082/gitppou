@@ -5,9 +5,10 @@ import { commitReportIfNeeded, syncReportBranchBeforeWrite } from "./git.js";
 
 async function main(): Promise<void> {
   try {
-    const config = await readActionConfig();
+    let config = await readActionConfig();
     if (config.commitReport) {
       await syncReportBranchBeforeWrite();
+      config = await readActionConfig();
     }
 
     const sendSlackAfterCommit = config.commitReport && config.slackNotify;
