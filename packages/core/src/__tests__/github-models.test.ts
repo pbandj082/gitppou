@@ -112,10 +112,50 @@ describe("refineWithGitHubModels", () => {
 
     const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
     const prompt = body.messages[0].content;
-    expect(prompt).toContain("truncated to 55 characters");
-    expect(prompt).toContain("truncated to 45 characters");
+    expect(prompt).toContain("truncated to 35 characters");
+    expect(prompt).toContain("truncated to 65 characters");
     expect(prompt).not.toContain("T".repeat(120));
     expect(prompt).not.toContain("E".repeat(120));
+  });
+
+  it("rejects model output that omits a required user-action issue group", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse({
+          choices: [
+            {
+              finish_reason: "stop",
+              message: {
+                content: "# 日報\n\n## 本日対応したこと\n\n### APP-1 Login"
+              }
+            }
+          ]
+        })
+      )
+    );
+
+    await expect(
+      refineWithGitHubModels({
+        config: baseConfig,
+        templateDraft: "# 日報\n\n### GAIATASK-1357 日報作成自動化ツール",
+        activities: [],
+        groups: [
+          {
+            issueKey: "GAIATASK-1357",
+            title: "日報作成自動化ツール",
+            activities: [
+              {
+                source: "github",
+                kind: "commit",
+                issueKey: "GAIATASK-1357",
+                title: "fix report generation"
+              }
+            ]
+          }
+        ]
+      })
+    ).rejects.toThrow("GitHub Models omitted required issue groups: GAIATASK-1357.");
   });
 });
 

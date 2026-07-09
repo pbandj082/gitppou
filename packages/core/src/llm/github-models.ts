@@ -32,34 +32,23 @@ export async function refineWithGitHubModels({
   groups
 }: RefineInput): Promise<string> {
   const inputBudgets = splitPromptInputBudget(config.llmMaxInputChars);
-  const reportEvidence = buildReportEvidence(activities);
-  const evidenceJson = JSON.stringify(
-    {
-      userActions: reportEvidence.userActions,
-      groupedUserActions: groups.map((group) => ({
-        issueKey: group.issueKey,
-        title: group.title,
-        actions: group.activities,
-        commentContext: commentContextForGroup(activities, group.activities)
-      })),
-      contextOnly: reportEvidence.contextOnly.filter((activity) => activity.kind !== "comment_context")
-    },
-    null,
-    2
-  );
+  const evidenceJson = buildPromptEvidence(activities, groups, inputBudgets.evidenceJson);
   const prompt = buildPrompt({
     date: config.reportDate,
     language: config.reportLanguage,
-    templateDraft: truncate(templateDraft, inputBudgets.templateDraft),
-    evidenceJson: truncate(evidenceJson, inputBudgets.evidenceJson)
+    templateDraft: truncate(stripRawActivitySection(templateDraft), inputBudgets.templateDraft),
+    evidenceJson
   });
 
-  return chatWithGitHubModels({
+  const markdown = await chatWithGitHubModels({
     config,
     prompt,
     maxTokens: config.llmStyle === "detailed" ? 6000 : 4000,
     temperature: config.llmStyle === "detailed" ? 0.2 : 0.1
   });
+  assertRequiredIssueGroupsRendered(markdown, groups);
+
+  return markdown;
 }
 
 export async function summarizeSlackWithGitHubModels({
@@ -149,6 +138,7 @@ function buildPrompt(input: {
 - 要約文はcommitメッセージ、PRタイトル、Backlogコメント本文、直前コメント文脈から「何について対応したか」を具体化し、activity種別だけの説明で終わらせない
 - URLは必ずMarkdownリンク（例: [リンク](https://example.com)）として出力し、生URLのまま書かない
 - 「userActions」にある当日ユーザー本人の行動だけを「本日対応したこと」に書く
+- 「groupedUserActions」に含まれる各issueKeyは、必ず本日対応したことの項目として出力し、省略しない
 - 「contextOnly」は直近の流れや課題の背景を説明するためだけに使い、ユーザー本人の作業として書かない
 - Backlogの「comment_context」は、ユーザーコメントが何への返信・確認なのかを判断するために使う
 - Backlogのcomment活動にmetadata.commentContext.previousCommentsがある場合は、直前コメントだけに限定せず、その中からユーザーコメントと関係が最も強い確認依頼・質問・指摘・レビュー依頼を選ぶ
@@ -192,6 +182,7 @@ Rules:
 - Make each summary concrete by using commit messages, PR titles, Backlog comment bodies, and previous-comment context; do not summarize only by activity type.
 - Always render URLs as Markdown links such as [link](https://example.com); do not emit raw URLs.
 - Write "Work completed today" only from entries in "userActions".
+- Include every issueKey from "groupedUserActions" as an item under "Work completed today"; do not omit any grouped user-action issue.
 - Use "contextOnly" only to explain recent flow or issue background. Do not present it as work done by the user.
 - Use Backlog "comment_context" entries to infer what a user comment confirms or replies to.
 - If a Backlog comment action has metadata.commentContext.previousComments, do not assume only the immediately previous comment is related; choose the most relevant request, question, concern, or review from that context.
@@ -300,12 +291,223 @@ function truncate(value: string, maxChars: number): string {
   return `${value.slice(0, maxChars)}\n...truncated to ${maxChars} characters`;
 }
 
+function assertRequiredIssueGroupsRendered(markdown: string, groups: ActivityGroup[]): void {
+  const missingIssueKeys = groups
+    .map((group) => group.issueKey)
+    .filter((issueKey) => issueKey !== "Unlinked")
+    .filter((issueKey) => !markdown.includes(issueKey));
+
+  if (missingIssueKeys.length > 0) {
+    throw new Error(`GitHub Models omitted required issue groups: ${missingIssueKeys.join(", ")}.`);
+  }
+}
+
 function splitPromptInputBudget(maxInputChars: number): { templateDraft: number; evidenceJson: number } {
   const totalBudget = Math.max(2, Math.min(maxInputChars, 20_000));
-  const templateDraft = Math.max(1, Math.floor(totalBudget * 0.55));
+  const templateDraft = Math.max(1, Math.min(8_000, Math.floor(totalBudget * 0.35)));
 
   return {
     templateDraft,
     evidenceJson: Math.max(1, totalBudget - templateDraft)
   };
+}
+
+function buildPromptEvidence(activities: NormalizedActivity[], groups: ActivityGroup[], maxChars: number): string {
+  const reportEvidence = buildReportEvidence(activities);
+  const attempts = [
+    {
+      actionBodyChars: 700,
+      contextBodyChars: 500,
+      contextOnlyBodyChars: 240,
+      contextOnlyLimit: 20,
+      includeUrls: true,
+      includeMetadata: true,
+      includeCommentContext: true
+    },
+    {
+      actionBodyChars: 360,
+      contextBodyChars: 240,
+      contextOnlyBodyChars: 160,
+      contextOnlyLimit: 10,
+      includeUrls: true,
+      includeMetadata: true,
+      includeCommentContext: true
+    },
+    {
+      actionBodyChars: 180,
+      contextBodyChars: 140,
+      contextOnlyBodyChars: 120,
+      contextOnlyLimit: 5,
+      includeUrls: true,
+      includeMetadata: true,
+      includeCommentContext: false
+    },
+    {
+      actionBodyChars: 0,
+      contextBodyChars: 0,
+      contextOnlyBodyChars: 0,
+      contextOnlyLimit: 0,
+      includeUrls: false,
+      includeMetadata: false,
+      includeCommentContext: false
+    }
+  ];
+
+  for (const options of attempts) {
+    const evidenceJson = JSON.stringify(
+      {
+        requiredIssueKeys: groups.map((group) => group.issueKey).filter((issueKey) => issueKey !== "Unlinked"),
+        groupedUserActions: groups.map((group) => ({
+          issueKey: group.issueKey,
+          title: group.title,
+          actions: group.activities.map((activity) =>
+            promptActivity(activity, {
+              bodyChars: options.actionBodyChars,
+              includeUrls: options.includeUrls,
+              includeMetadata: options.includeMetadata
+            })
+          ),
+          ...(options.includeCommentContext
+            ? {
+                commentContext: commentContextForGroup(activities, group.activities).map((activity) =>
+                  promptActivity(activity, {
+                    bodyChars: options.contextBodyChars,
+                    includeUrls: options.includeUrls,
+                    includeMetadata: false
+                  })
+                )
+              }
+            : {})
+        })),
+        contextOnly: reportEvidence.contextOnly
+          .filter((activity) => activity.kind !== "comment_context")
+          .slice(0, options.contextOnlyLimit)
+          .map((activity) =>
+            promptEvidenceContext(activity, {
+              bodyChars: options.contextOnlyBodyChars,
+              includeUrls: options.includeUrls,
+              includeMetadata: options.includeMetadata
+            })
+          )
+      },
+      null,
+      2
+    );
+
+    if (evidenceJson.length <= maxChars || options === attempts.at(-1)) {
+      return evidenceJson.length <= maxChars ? evidenceJson : truncate(evidenceJson, maxChars);
+    }
+  }
+
+  return "";
+}
+
+function promptActivity(
+  activity: NormalizedActivity,
+  options: {
+    bodyChars: number;
+    includeUrls: boolean;
+    includeMetadata: boolean;
+  }
+): Record<string, unknown> {
+  return compactRecord({
+    source: activity.source,
+    kind: activity.kind,
+    issueKey: activity.issueKey,
+    title: truncateInline(activity.title, 180),
+    repository: activity.repository,
+    body: options.bodyChars > 0 && activity.body ? truncateInline(activity.body, options.bodyChars) : undefined,
+    url: options.includeUrls ? activity.url : undefined,
+    createdAt: activity.createdAt,
+    updatedAt: activity.updatedAt,
+    metadata: options.includeMetadata ? promptMetadata(activity.metadata) : undefined
+  }) ?? {};
+}
+
+function promptEvidenceContext(
+  activity: ReturnType<typeof buildReportEvidence>["contextOnly"][number],
+  options: {
+    bodyChars: number;
+    includeUrls: boolean;
+    includeMetadata: boolean;
+  }
+): Record<string, unknown> {
+  return compactRecord({
+    source: activity.source,
+    kind: activity.kind,
+    issueKey: activity.issueKey,
+    title: truncateInline(activity.title, 180),
+    repository: activity.repository,
+    body: options.bodyChars > 0 && activity.body ? truncateInline(activity.body, options.bodyChars) : undefined,
+    url: options.includeUrls ? activity.url : undefined,
+    createdAt: activity.createdAt,
+    updatedAt: activity.updatedAt,
+    metadata: options.includeMetadata ? promptMetadata(activity.metadata) : undefined
+  }) ?? {};
+}
+
+function promptMetadata(metadata: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
+  if (!metadata) {
+    return undefined;
+  }
+
+  return compactRecord({
+    status: metadata.status,
+    previousStatus: metadata.previousStatus,
+    issueType: metadata.issueType,
+    categories: metadata.categories,
+    branch: metadata.branch,
+    baseBranch: metadata.baseBranch,
+    pullRequestNumber: metadata.pullRequestNumber ?? metadata.number,
+    pullRequestTitle: metadata.pullRequestTitle,
+    pullRequestUrl: metadata.pullRequestUrl,
+    additions: metadata.additions,
+    deletions: metadata.deletions,
+    changedFiles: metadata.changedFiles,
+    milestone: metadata.milestone,
+    startDate: metadata.startDate,
+    dueDate: metadata.dueDate,
+    assignee: metadata.assignee
+  });
+}
+
+function compactRecord(record: Record<string, unknown>): Record<string, unknown> | undefined {
+  const compacted = Object.fromEntries(
+    Object.entries(record).filter(([, value]) => {
+      if (value === undefined) {
+        return false;
+      }
+
+      if (Array.isArray(value) && value.length === 0) {
+        return false;
+      }
+
+      if (typeof value === "object" && value !== null && !Array.isArray(value) && Object.keys(value).length === 0) {
+        return false;
+      }
+
+      return true;
+    })
+  );
+
+  return Object.keys(compacted).length > 0 ? compacted : undefined;
+}
+
+function truncateInline(value: string, maxChars: number): string {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (normalized.length <= maxChars) {
+    return normalized;
+  }
+
+  return `${normalized.slice(0, maxChars)}...`;
+}
+
+function stripRawActivitySection(markdown: string): string {
+  const marker = "\n## Raw Activity";
+  const markerIndex = markdown.indexOf(marker);
+  if (markerIndex === -1) {
+    return markdown;
+  }
+
+  return markdown.slice(0, markerIndex).trimEnd();
 }
