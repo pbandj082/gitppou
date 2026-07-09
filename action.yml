@@ -25,6 +25,8 @@ outputs:
     description: "Created Backlog document ID when Backlog document publishing is enabled"
   backlog-document-title:
     description: "Created Backlog document title when Backlog document publishing is enabled"
+  backlog-document-url:
+    description: "Created Backlog document URL when Backlog document publishing is enabled"
   report-markdown:
     description: "Generated report markdown"
 

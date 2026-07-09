@@ -36427,11 +36427,15 @@ async function main() {
         if (backlogDocument) {
             _actions_core__WEBPACK_IMPORTED_MODULE_0__.setOutput("backlog-document-id", backlogDocument.id);
             _actions_core__WEBPACK_IMPORTED_MODULE_0__.setOutput("backlog-document-title", backlogDocument.title);
+            if (backlogDocument.url) {
+                _actions_core__WEBPACK_IMPORTED_MODULE_0__.setOutput("backlog-document-url", backlogDocument.url);
+            }
         }
         _actions_core__WEBPACK_IMPORTED_MODULE_0__.setOutput("report-markdown", result.reportMarkdown);
         if (sendSlackAfterCommit) {
+            const slackSummary = (0,_gitppou_core__WEBPACK_IMPORTED_MODULE_1__/* .generateSlackSummary */ .Wd)(config, result.reportPaths, result.reportMarkdown, result.slackSummaryText, backlogDocument ? { backlogDocument } : {});
             try {
-                await (0,_gitppou_core__WEBPACK_IMPORTED_MODULE_1__/* .sendSlackNotification */ .g4)(config.slackWebhookUrl, result.slackSummary);
+                await (0,_gitppou_core__WEBPACK_IMPORTED_MODULE_1__/* .sendSlackNotification */ .g4)(config.slackWebhookUrl, slackSummary);
             }
             catch (error) {
                 _actions_core__WEBPACK_IMPORTED_MODULE_0__.warning(`Slack notification failed. ${formatError(error)}`);
@@ -36460,11 +36464,12 @@ __webpack_async_result__();
 __nccwpck_require__.d(__webpack_exports__, {
   dt: () => (/* reexport */ buildGitppouConfig),
   jl: () => (/* reexport */ generateDailyReport),
+  Wd: () => (/* reexport */ generateSlackSummary),
   s4: () => (/* reexport */ publishBacklogDocument),
   g4: () => (/* reexport */ sendSlackNotification)
 });
 
-// UNUSED EXPORTS: DEFAULT_LLM_MAX_INPUT_CHARS, DEFAULT_LLM_MODEL, DEFAULT_LLM_PROVIDER, DEFAULT_LLM_STYLE, DEFAULT_REPORT_LANGUAGE, DEFAULT_REPORT_TIMEZONE, assertValidDateString, assertValidTimeZone, buildReportHtmlPath, buildReportPath, buildReportPdfPath, extractIssueKeys, fetchBacklogActivities, fetchGitHubActivities, formatDateInTimeZone, generateSlackSummary, getReportDateRange, groupActivitiesByIssueKey, isOnReportDate, normalizeActivities, parseCommaSeparatedList, parseGitHubRepoSpecString, parseLlmProvider, parseLlmStyle, parseReportLanguage, resolveGitHubTokenForOwner, resolveReportDate
+// UNUSED EXPORTS: DEFAULT_LLM_MAX_INPUT_CHARS, DEFAULT_LLM_MODEL, DEFAULT_LLM_PROVIDER, DEFAULT_LLM_STYLE, DEFAULT_REPORT_LANGUAGE, DEFAULT_REPORT_TIMEZONE, assertValidDateString, assertValidTimeZone, buildReportHtmlPath, buildReportPath, buildReportPdfPath, extractIssueKeys, fetchBacklogActivities, fetchGitHubActivities, formatDateInTimeZone, getReportDateRange, groupActivitiesByIssueKey, isOnReportDate, normalizeActivities, parseCommaSeparatedList, parseGitHubRepoSpecString, parseLlmProvider, parseLlmStyle, parseReportLanguage, resolveGitHubTokenForOwner, resolveReportDate
 
 ;// CONCATENATED MODULE: ../core/dist/config.js
 const DEFAULT_REPORT_LANGUAGE = "en";
@@ -37110,10 +37115,14 @@ async function publishBacklogDocument(config, reportMarkdown) {
             ? { addLast: documentConfig.addLast }
             : {}),
     });
+    const url = buildDocumentUrl(documentConfig, response.id);
     return {
         id: response.id,
         projectId: response.projectId,
         title: response.title,
+        ...(url ? { url } : {}),
+        ...(response.created ? { created: response.created } : {}),
+        ...(response.updated ? { updated: response.updated } : {}),
     };
 }
 async function resolveDocumentProjectId(config) {
@@ -37132,6 +37141,12 @@ function documentTitle(config) {
         ? `日報 ${config.reportDate}`
         : `Daily Report ${config.reportDate}`;
     return (config.title || fallback).replace(/\{\{\s*date\s*\}\}/g, config.reportDate);
+}
+function buildDocumentUrl(config, documentId) {
+    if (!config.projectKey) {
+        return undefined;
+    }
+    return `https://${backlogHost(config)}/document/${encodeURIComponent(config.projectKey)}/${encodeURIComponent(documentId)}`;
 }
 async function fetchBacklogSpaceActivities(config) {
     const resolvedConfig = await resolveBacklogUserId(config);
@@ -44301,7 +44316,7 @@ function pdf_truncate(value, maxChars) {
 }
 
 ;// CONCATENATED MODULE: ../core/dist/slack.js
-function generateSlackSummary(config, reportPathOrPaths, reportMarkdown, summaryText) {
+function generateSlackSummary(config, reportPathOrPaths, reportMarkdown, summaryText, options = {}) {
     const isJapanese = config.reportLanguage === "ja";
     const title = isJapanese
         ? `日報 ${config.reportDate}`
@@ -44312,6 +44327,7 @@ function generateSlackSummary(config, reportPathOrPaths, reportMarkdown, summary
         ? reportPathOrPaths
         : [reportPathOrPaths];
     const details = reportPaths.map((reportPath) => `- ${reportDetails(reportPath, config.githubActionsContext)}`);
+    const backlogDocumentDetail = backlogDocumentDetails(options.backlogDocument, isJapanese);
     const summary = slack_cleanSummaryText(summaryText) ??
         localReportSummary(reportMarkdown, config.reportLanguage);
     const lines = [
@@ -44319,10 +44335,18 @@ function generateSlackSummary(config, reportPathOrPaths, reportMarkdown, summary
         ...(contextLine ? [contextLine] : []),
         `${detailsLabel}:`,
         ...details,
+        ...(backlogDocumentDetail ? [backlogDocumentDetail] : []),
         "",
         summary,
     ];
     return slack_truncate(lines.join("\n"), 3500);
+}
+function backlogDocumentDetails(backlogDocument, isJapanese) {
+    if (!backlogDocument?.url) {
+        return undefined;
+    }
+    const label = isJapanese ? "Backlogドキュメント" : "Backlog document";
+    return `- ${label}: <${backlogDocument.url}|${backlogDocument.title}>`;
 }
 function githubActionsContextLine(context) {
     if (!context) {
@@ -44461,7 +44485,7 @@ function slack_truncate(value, maxChars) {
 
 
 
-async function generateDailyReport(config) {
+async function generateDailyReport(config, generatedAt = new Date()) {
     const [githubActivities, backlogActivities] = await fetchActivities(config);
     const backlogProjectKeys = config.backlogSpaces.flatMap((space) => space.projectKeys);
     const activities = normalizeActivities([...githubActivities, ...backlogActivities], backlogProjectKeys);
@@ -44486,7 +44510,7 @@ async function generateDailyReport(config) {
             console.warn(`Gitppou warning: GitHub Models failed; using template report. ${formatError(error)}`);
         }
     }
-    reportMarkdown = normalizeMarkdownLinks(reportMarkdown);
+    reportMarkdown = addReportFrontMatter(normalizeMarkdownLinks(reportMarkdown), config, generatedAt);
     const reportPaths = [];
     const formats = config.reportFormats.length > 0 ? config.reportFormats : ["markdown"];
     const markdownPath = buildReportPath(config.reportDir, config.reportDate);
@@ -44516,7 +44540,7 @@ async function generateDailyReport(config) {
         : await publishBacklogDocument(config, reportMarkdown);
     const slackSummaryText = await generateSlackSummaryText(config, reportMarkdown);
     const primaryReportPath = reportPdfPath ?? reportHtmlPath ?? markdownPath;
-    const slackSummary = generateSlackSummary(config, reportPaths, reportMarkdown, slackSummaryText);
+    const slackSummary = generateSlackSummary(config, reportPaths, reportMarkdown, slackSummaryText, backlogDocument ? { backlogDocument } : {});
     if (config.slackNotify && !config.deferSlackNotification) {
         try {
             await sendSlackNotification(config.slackWebhookUrl, slackSummary);
@@ -44532,8 +44556,38 @@ async function generateDailyReport(config) {
         reportPaths,
         reportMarkdown,
         slackSummary,
+        ...(slackSummaryText ? { slackSummaryText } : {}),
         ...(backlogDocument ? { backlogDocument } : {}),
     };
+}
+function addReportFrontMatter(reportMarkdown, config, generatedAt) {
+    const context = config.githubActionsContext;
+    const fields = [
+        ["reportDate", config.reportDate],
+        ["timezone", config.reportTimezone],
+        ["author", config.githubUsername],
+        ["generatedBy", context?.actor ?? config.githubUsername],
+        ["generatedAt", generatedAt.toISOString()],
+        ["generator", "gitppou"],
+        ["repository", context?.repository],
+        ["ref", context?.refName],
+        ["workflow", context?.workflow],
+        ["runId", context?.runId],
+        ["runNumber", context?.runNumber],
+        ["eventName", context?.eventName],
+    ];
+    return [
+        "---",
+        ...fields
+            .filter((entry) => Boolean(entry[1]))
+            .map(([key, value]) => `${key}: ${yamlString(value)}`),
+        "---",
+        "",
+        reportMarkdown.trimStart(),
+    ].join("\n");
+}
+function yamlString(value) {
+    return JSON.stringify(value);
 }
 async function generateSlackSummaryText(config, reportMarkdown) {
     if (!config.slackNotify || config.llmProvider !== "github-models") {

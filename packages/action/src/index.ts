@@ -1,6 +1,7 @@
 import * as core from "@actions/core";
 import {
   generateDailyReport,
+  generateSlackSummary,
   publishBacklogDocument,
   sendSlackNotification,
 } from "@gitppou/core";
@@ -50,15 +51,22 @@ async function main(): Promise<void> {
     if (backlogDocument) {
       core.setOutput("backlog-document-id", backlogDocument.id);
       core.setOutput("backlog-document-title", backlogDocument.title);
+      if (backlogDocument.url) {
+        core.setOutput("backlog-document-url", backlogDocument.url);
+      }
     }
     core.setOutput("report-markdown", result.reportMarkdown);
 
     if (sendSlackAfterCommit) {
+      const slackSummary = generateSlackSummary(
+        config,
+        result.reportPaths,
+        result.reportMarkdown,
+        result.slackSummaryText,
+        backlogDocument ? { backlogDocument } : {},
+      );
       try {
-        await sendSlackNotification(
-          config.slackWebhookUrl,
-          result.slackSummary,
-        );
+        await sendSlackNotification(config.slackWebhookUrl, slackSummary);
       } catch (error) {
         core.warning(`Slack notification failed. ${formatError(error)}`);
       }

@@ -614,6 +614,8 @@ describe("publishBacklogDocument", () => {
             id: "document-id",
             projectId: 456,
             title: "日報 2026-07-06",
+            created: "2026-07-06T09:00:00Z",
+            updated: "2026-07-06T09:00:00Z",
           });
         }
 
@@ -641,6 +643,9 @@ describe("publishBacklogDocument", () => {
       id: "document-id",
       projectId: 456,
       title: "日報 2026-07-06",
+      url: "https://example.backlog.com/document/APP/document-id",
+      created: "2026-07-06T09:00:00Z",
+      updated: "2026-07-06T09:00:00Z",
     });
 
     const postRequest = requests.find(

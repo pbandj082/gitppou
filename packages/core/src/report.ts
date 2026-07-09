@@ -22,6 +22,7 @@ import type {
 
 export async function generateDailyReport(
   config: GitppouConfig,
+  generatedAt = new Date(),
 ): Promise<ReportResult> {
   const [githubActivities, backlogActivities] = await fetchActivities(config);
   const backlogProjectKeys = config.backlogSpaces.flatMap(
@@ -54,7 +55,11 @@ export async function generateDailyReport(
       );
     }
   }
-  reportMarkdown = normalizeMarkdownLinks(reportMarkdown);
+  reportMarkdown = addReportFrontMatter(
+    normalizeMarkdownLinks(reportMarkdown),
+    config,
+    generatedAt,
+  );
 
   const reportPaths: string[] = [];
   const formats =
@@ -99,6 +104,7 @@ export async function generateDailyReport(
     reportPaths,
     reportMarkdown,
     slackSummaryText,
+    backlogDocument ? { backlogDocument } : {},
   );
   if (config.slackNotify && !config.deferSlackNotification) {
     try {
@@ -117,8 +123,45 @@ export async function generateDailyReport(
     reportPaths,
     reportMarkdown,
     slackSummary,
+    ...(slackSummaryText ? { slackSummaryText } : {}),
     ...(backlogDocument ? { backlogDocument } : {}),
   };
+}
+
+function addReportFrontMatter(
+  reportMarkdown: string,
+  config: GitppouConfig,
+  generatedAt: Date,
+): string {
+  const context = config.githubActionsContext;
+  const fields: Array<[string, string | undefined]> = [
+    ["reportDate", config.reportDate],
+    ["timezone", config.reportTimezone],
+    ["author", config.githubUsername],
+    ["generatedBy", context?.actor ?? config.githubUsername],
+    ["generatedAt", generatedAt.toISOString()],
+    ["generator", "gitppou"],
+    ["repository", context?.repository],
+    ["ref", context?.refName],
+    ["workflow", context?.workflow],
+    ["runId", context?.runId],
+    ["runNumber", context?.runNumber],
+    ["eventName", context?.eventName],
+  ];
+
+  return [
+    "---",
+    ...fields
+      .filter((entry): entry is [string, string] => Boolean(entry[1]))
+      .map(([key, value]) => `${key}: ${yamlString(value)}`),
+    "---",
+    "",
+    reportMarkdown.trimStart(),
+  ].join("\n");
+}
+
+function yamlString(value: string): string {
+  return JSON.stringify(value);
 }
 
 async function generateSlackSummaryText(

@@ -1,7 +1,15 @@
-import type { GitHubActionsContext, GitppouConfig } from "./types.js";
+import type {
+  BacklogDocumentResult,
+  GitHubActionsContext,
+  GitppouConfig,
+} from "./types.js";
 
 type SlackPayload = {
   text: string;
+};
+
+export type SlackSummaryOptions = {
+  backlogDocument?: BacklogDocumentResult;
 };
 
 export function generateSlackSummary(
@@ -9,6 +17,7 @@ export function generateSlackSummary(
   reportPathOrPaths: string | string[],
   reportMarkdown: string,
   summaryText?: string,
+  options: SlackSummaryOptions = {},
 ): string {
   const isJapanese = config.reportLanguage === "ja";
   const title = isJapanese
@@ -23,6 +32,10 @@ export function generateSlackSummary(
     (reportPath) =>
       `- ${reportDetails(reportPath, config.githubActionsContext)}`,
   );
+  const backlogDocumentDetail = backlogDocumentDetails(
+    options.backlogDocument,
+    isJapanese,
+  );
   const summary =
     cleanSummaryText(summaryText) ??
     localReportSummary(reportMarkdown, config.reportLanguage);
@@ -31,11 +44,24 @@ export function generateSlackSummary(
     ...(contextLine ? [contextLine] : []),
     `${detailsLabel}:`,
     ...details,
+    ...(backlogDocumentDetail ? [backlogDocumentDetail] : []),
     "",
     summary,
   ];
 
   return truncate(lines.join("\n"), 3500);
+}
+
+function backlogDocumentDetails(
+  backlogDocument: BacklogDocumentResult | undefined,
+  isJapanese: boolean,
+): string | undefined {
+  if (!backlogDocument?.url) {
+    return undefined;
+  }
+
+  const label = isJapanese ? "Backlogドキュメント" : "Backlog document";
+  return `- ${label}: <${backlogDocument.url}|${backlogDocument.title}>`;
 }
 
 function githubActionsContextLine(
