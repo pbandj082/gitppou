@@ -2,7 +2,11 @@ import { describe, expect, it } from "vitest";
 import { resolveReportDate } from "../config.js";
 import { renderReportHtml } from "../html.js";
 import { generateTemplateReport } from "../llm/template.js";
-import { buildReportHtmlPath, buildReportPath } from "../report.js";
+import {
+  buildReportHtmlPath,
+  buildReportPath,
+  buildReportPdfPath,
+} from "../report.js";
 import type { GitppouConfig, NormalizedActivity } from "../types.js";
 
 const baseConfig: GitppouConfig = {
@@ -22,6 +26,7 @@ const baseConfig: GitppouConfig = {
   reportDir: "reports",
   reportFormats: ["markdown"],
   reportHtmlDir: ".gitppou/site",
+  reportPdfDir: ".gitppou/pdf",
   commitReport: false,
   slackNotify: false,
   llmProvider: "template",
@@ -43,6 +48,12 @@ describe("report helpers", () => {
     );
   });
 
+  it("builds the monthly PDF report path", () => {
+    expect(buildReportPdfPath(".gitppou/pdf", "2026-07-03")).toBe(
+      ".gitppou/pdf/2026-07/2026-07-03.pdf",
+    );
+  });
+
   it("rejects report paths outside the workspace", () => {
     expect(() => buildReportPath("../reports", "2026-07-03")).toThrow(
       "report-dir",
@@ -52,6 +63,12 @@ describe("report helpers", () => {
   it("rejects HTML report paths outside the workspace", () => {
     expect(() => buildReportHtmlPath("../site", "2026-07-03")).toThrow(
       "report.htmlDir",
+    );
+  });
+
+  it("rejects PDF report paths outside the workspace", () => {
+    expect(() => buildReportPdfPath("../pdf", "2026-07-03")).toThrow(
+      "report.pdfDir",
     );
   });
 

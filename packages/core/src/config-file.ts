@@ -104,6 +104,8 @@ export function buildGitppouConfig(
     reportFormats: getReportFormats(report),
     reportHtmlDir:
       getString(report, "htmlDir", "config.report.htmlDir") ?? ".gitppou/site",
+    reportPdfDir:
+      getString(report, "pdfDir", "config.report.pdfDir") ?? ".gitppou/pdf",
     commitReport:
       options.commitReport ??
       getOptionalBoolean(git, "commitReport", "config.git.commitReport") ??
@@ -172,11 +174,11 @@ function getReportFormats(report: RawObject): ReportFormat[] {
 }
 
 function parseReportFormat(value: string, pathLabel: string): ReportFormat {
-  if (value === "markdown" || value === "html") {
+  if (value === "markdown" || value === "html" || value === "pdf") {
     return value;
   }
 
-  throw new Error(`${pathLabel} must contain only markdown or html.`);
+  throw new Error(`${pathLabel} must contain only markdown, html, or pdf.`);
 }
 
 function getSection(root: RawObject, key: string): RawObject {

@@ -55,6 +55,7 @@ describe("buildPreviewConfig", () => {
       reportDir: "reports",
       reportFormats: ["markdown"],
       reportHtmlDir: ".gitppou/site",
+      reportPdfDir: ".gitppou/pdf",
       commitReport: false,
       slackNotify: false,
       llmProvider: "template",
@@ -357,8 +358,9 @@ describe("buildPreviewConfig", () => {
           enabled: false,
         },
         report: {
-          formats: ["markdown", "html", "html"],
+          formats: ["markdown", "html", "pdf", "html"],
           htmlDir: "public/daily-reports",
+          pdfDir: "public/daily-reports/pdf",
         },
       },
       {},
@@ -367,8 +369,9 @@ describe("buildPreviewConfig", () => {
       },
     );
 
-    expect(config.reportFormats).toEqual(["markdown", "html"]);
+    expect(config.reportFormats).toEqual(["markdown", "html", "pdf"]);
     expect(config.reportHtmlDir).toBe("public/daily-reports");
+    expect(config.reportPdfDir).toBe("public/daily-reports/pdf");
   });
 
   it("rejects unknown report output formats", () => {
@@ -383,7 +386,7 @@ describe("buildPreviewConfig", () => {
             enabled: false,
           },
           report: {
-            formats: ["pdf"],
+            formats: ["docx"],
           },
         },
         {},
@@ -391,7 +394,9 @@ describe("buildPreviewConfig", () => {
           GITHUB_TOKEN: "github-token",
         },
       ),
-    ).toThrow("config.report.formats must contain only markdown or html.");
+    ).toThrow(
+      "config.report.formats must contain only markdown, html, or pdf.",
+    );
   });
 
   it("requires API credentials from environment variables", () => {

@@ -43,6 +43,7 @@ const baseConfig: GitppouConfig = {
   reportDir: ".gitppou/reports",
   reportFormats: ["markdown"],
   reportHtmlDir: ".gitppou/site",
+  reportPdfDir: ".gitppou/pdf",
   commitReport: true,
   slackNotify: false,
   llmProvider: "template",
@@ -52,11 +53,13 @@ const baseConfig: GitppouConfig = {
 };
 
 const reportResult: ReportResult = {
-  reportPath: ".gitppou/site/2026-07/2026-07-08.html",
+  reportPath: ".gitppou/pdf/2026-07/2026-07-08.pdf",
   reportHtmlPath: ".gitppou/site/2026-07/2026-07-08.html",
+  reportPdfPath: ".gitppou/pdf/2026-07/2026-07-08.pdf",
   reportPaths: [
     ".gitppou/reports/2026-07/2026-07-08.md",
     ".gitppou/site/2026-07/2026-07-08.html",
+    ".gitppou/pdf/2026-07/2026-07-08.pdf",
   ],
   reportMarkdown: "# 日報",
   slackSummary: "summary",
@@ -82,7 +85,7 @@ describe("action entrypoint", () => {
     };
     const syncedConfig: GitppouConfig = {
       ...baseConfig,
-      reportFormats: ["markdown", "html"],
+      reportFormats: ["markdown", "html", "pdf"],
     };
     mocks.readActionConfig
       .mockResolvedValueOnce(staleConfig)
@@ -95,8 +98,7 @@ describe("action entrypoint", () => {
     expect(mocks.syncReportBranchBeforeWrite).toHaveBeenCalledTimes(1);
     const syncOrder =
       mocks.syncReportBranchBeforeWrite.mock.invocationCallOrder[0];
-    const secondReadOrder =
-      mocks.readActionConfig.mock.invocationCallOrder[1];
+    const secondReadOrder = mocks.readActionConfig.mock.invocationCallOrder[1];
     expect(syncOrder).toBeDefined();
     expect(secondReadOrder).toBeDefined();
     expect(syncOrder ?? 0).toBeLessThan(secondReadOrder ?? 0);
@@ -108,6 +110,10 @@ describe("action entrypoint", () => {
     expect(mocks.setOutput).toHaveBeenCalledWith(
       "report-html-path",
       ".gitppou/site/2026-07/2026-07-08.html",
+    );
+    expect(mocks.setOutput).toHaveBeenCalledWith(
+      "report-pdf-path",
+      ".gitppou/pdf/2026-07/2026-07-08.pdf",
     );
   });
 });

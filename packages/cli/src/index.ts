@@ -167,6 +167,7 @@ async function runPreview(options: CliOptions): Promise<void> {
           reportPath: result.reportPath,
           reportPaths: result.reportPaths,
           reportHtmlPath: result.reportHtmlPath,
+          reportPdfPath: result.reportPdfPath,
           reportMarkdown: result.reportMarkdown,
           slackSummary: result.slackSummary,
           slackNotify: config.slackNotify,

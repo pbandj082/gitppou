@@ -11,6 +11,7 @@ import {
 } from "./llm/index.js";
 import { normalizeMarkdownLinks } from "./markdown.js";
 import { groupActivitiesByIssueKey, normalizeActivities } from "./normalize.js";
+import { saveReportPdf } from "./pdf.js";
 import { filterGroupsByUserActions } from "./report-evidence.js";
 import { generateSlackSummary, sendSlackNotification } from "./slack.js";
 import type {
@@ -62,25 +63,37 @@ export async function generateDailyReport(
   const reportHtmlPath = formats.includes("html")
     ? buildReportHtmlPath(config.reportHtmlDir, config.reportDate)
     : undefined;
+  const reportPdfPath = formats.includes("pdf")
+    ? buildReportPdfPath(config.reportPdfDir, config.reportDate)
+    : undefined;
+  const reportHtml =
+    reportHtmlPath || reportPdfPath
+      ? renderReportHtml(reportMarkdown, config)
+      : undefined;
 
   if (formats.includes("markdown")) {
     await saveReport(markdownPath, reportMarkdown);
     reportPaths.push(markdownPath);
   }
 
-  if (reportHtmlPath) {
-    await saveReport(reportHtmlPath, renderReportHtml(reportMarkdown, config));
+  if (reportHtmlPath && reportHtml) {
+    await saveReport(reportHtmlPath, reportHtml);
     reportPaths.push(reportHtmlPath);
+  }
+
+  if (reportPdfPath && reportHtml) {
+    await saveReportPdf(reportHtml, reportPdfPath);
+    reportPaths.push(reportPdfPath);
   }
 
   const slackSummaryText = await generateSlackSummaryText(
     config,
     reportMarkdown,
   );
-  const primaryReportPath = reportHtmlPath ?? markdownPath;
+  const primaryReportPath = reportPdfPath ?? reportHtmlPath ?? markdownPath;
   const slackSummary = generateSlackSummary(
     config,
-    primaryReportPath,
+    reportPaths,
     reportMarkdown,
     slackSummaryText,
   );
@@ -97,6 +110,7 @@ export async function generateDailyReport(
   return {
     reportPath: primaryReportPath,
     ...(reportHtmlPath ? { reportHtmlPath } : {}),
+    ...(reportPdfPath ? { reportPdfPath } : {}),
     reportPaths,
     reportMarkdown,
     slackSummary,
@@ -176,6 +190,13 @@ export function buildReportHtmlPath(
   );
 }
 
+export function buildReportPdfPath(
+  reportPdfDir: string,
+  reportDate: string,
+): string {
+  return buildDatedReportPath(reportPdfDir, reportDate, "pdf", "report.pdfDir");
+}
+
 async function saveReport(reportPath: string, contents: string): Promise<void> {
   const absolutePath = path.resolve(reportPath);
   await mkdir(path.dirname(absolutePath), { recursive: true });
@@ -185,7 +206,7 @@ async function saveReport(reportPath: string, contents: string): Promise<void> {
 function buildDatedReportPath(
   reportDir: string,
   reportDate: string,
-  extension: "md" | "html",
+  extension: "md" | "html" | "pdf",
   label: string,
 ): string {
   const cleanDir =

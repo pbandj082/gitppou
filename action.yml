@@ -19,6 +19,8 @@ outputs:
     description: "Generated report file paths, one per line"
   report-html-path:
     description: "Generated HTML report file path when HTML output is enabled"
+  report-pdf-path:
+    description: "Generated PDF report file path when PDF output is enabled"
   report-markdown:
     description: "Generated report markdown"
 

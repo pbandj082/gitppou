@@ -6,45 +6,76 @@ type SlackPayload = {
 
 export function generateSlackSummary(
   config: GitppouConfig,
-  reportPath: string,
+  reportPathOrPaths: string | string[],
   reportMarkdown: string,
-  summaryText?: string
+  summaryText?: string,
 ): string {
   const isJapanese = config.reportLanguage === "ja";
-  const title = isJapanese ? `日報 ${config.reportDate}` : `Daily Report - ${config.reportDate}`;
+  const title = isJapanese
+    ? `日報 ${config.reportDate}`
+    : `Daily Report - ${config.reportDate}`;
   const detailsLabel = isJapanese ? "詳細" : "Details";
   const contextLine = githubActionsContextLine(config.githubActionsContext);
-  const details = reportDetails(reportPath, config.githubActionsContext);
-  const summary = cleanSummaryText(summaryText) ?? localReportSummary(reportMarkdown, config.reportLanguage);
+  const reportPaths = Array.isArray(reportPathOrPaths)
+    ? reportPathOrPaths
+    : [reportPathOrPaths];
+  const details = reportPaths.map(
+    (reportPath) =>
+      `- ${reportDetails(reportPath, config.githubActionsContext)}`,
+  );
+  const summary =
+    cleanSummaryText(summaryText) ??
+    localReportSummary(reportMarkdown, config.reportLanguage);
   const lines = [
     title,
     ...(contextLine ? [contextLine] : []),
-    `${detailsLabel}: ${details}`,
+    `${detailsLabel}:`,
+    ...details,
     "",
-    summary
+    summary,
   ];
 
   return truncate(lines.join("\n"), 3500);
 }
 
-function githubActionsContextLine(context: GitHubActionsContext | undefined): string | undefined {
+function githubActionsContextLine(
+  context: GitHubActionsContext | undefined,
+): string | undefined {
   if (!context) {
     return undefined;
   }
 
-  const workflow = [context.workflow, context.runNumber ? `#${context.runNumber}` : undefined].filter(Boolean).join(" ");
-  const repository = [context.repository, context.refName ? `(${context.refName})` : undefined].filter(Boolean).join(" ");
+  const workflow = [
+    context.workflow,
+    context.runNumber ? `#${context.runNumber}` : undefined,
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const repository = [
+    context.repository,
+    context.refName ? `(${context.refName})` : undefined,
+  ]
+    .filter(Boolean)
+    .join(" ");
   const actor = context.actor ? `by ${context.actor}` : undefined;
-  const parts = [actor, workflow || undefined, repository || undefined].filter((part): part is string => Boolean(part));
+  const parts = [actor, workflow || undefined, repository || undefined].filter(
+    (part): part is string => Boolean(part),
+  );
   return parts.length > 0 ? parts.join(" / ") : undefined;
 }
 
-function reportDetails(reportPath: string, context: GitHubActionsContext | undefined): string {
+function reportDetails(
+  reportPath: string,
+  context: GitHubActionsContext | undefined,
+): string {
   const url = githubReportFileUrl(reportPath, context);
   return url ? `<${url}|${reportPath}>` : reportPath;
 }
 
-function githubReportFileUrl(reportPath: string, context: GitHubActionsContext | undefined): string | undefined {
+function githubReportFileUrl(
+  reportPath: string,
+  context: GitHubActionsContext | undefined,
+): string | undefined {
   if (!context?.repository || !context.refName) {
     return undefined;
   }
@@ -65,9 +96,12 @@ function cleanSummaryText(value: string | undefined): string | undefined {
 
 function localReportSummary(
   reportMarkdown: string,
-  language: GitppouConfig["reportLanguage"]
+  language: GitppouConfig["reportLanguage"],
 ): string {
-  const workItems = sectionHeadings(reportMarkdown, language === "ja" ? "本日対応したこと" : "Work completed today")
+  const workItems = sectionHeadings(
+    reportMarkdown,
+    language === "ja" ? "本日対応したこと" : "Work completed today",
+  )
     .filter((heading) => heading !== "Unlinked")
     .slice(0, 3);
   const nextItems = nextActionItems(reportMarkdown, language).slice(0, 2);
@@ -77,7 +111,10 @@ function localReportSummary(
       return "本日のユーザー行動は見つかりませんでした。詳細はリンク先の日報を確認してください。";
     }
 
-    const next = nextItems.length > 0 ? `明日は${joinJapanese(nextItems)}を確認・対応する予定です。` : "";
+    const next =
+      nextItems.length > 0
+        ? `明日は${joinJapanese(nextItems)}を確認・対応する予定です。`
+        : "";
     return `本日は${joinJapanese(workItems)}を中心に対応しました。${next}`;
   }
 
@@ -85,22 +122,36 @@ function localReportSummary(
     return "No user activity was found for this date. See the linked report for details.";
   }
 
-  const next = nextItems.length > 0 ? ` Next actions focus on ${joinEnglish(nextItems)}.` : "";
+  const next =
+    nextItems.length > 0
+      ? ` Next actions focus on ${joinEnglish(nextItems)}.`
+      : "";
   return `Worked mainly on ${joinEnglish(workItems)}.${next}`;
 }
 
-function sectionHeadings(reportMarkdown: string, sectionTitle: string): string[] {
+function sectionHeadings(
+  reportMarkdown: string,
+  sectionTitle: string,
+): string[] {
   return sectionLines(reportMarkdown, sectionTitle)
     .filter((line) => /^###\s+/.test(line))
     .map((line) => stripMarkdownLinks(line.replace(/^###\s+/, "").trim()))
     .filter(Boolean);
 }
 
-function nextActionItems(reportMarkdown: string, language: GitppouConfig["reportLanguage"]): string[] {
+function nextActionItems(
+  reportMarkdown: string,
+  language: GitppouConfig["reportLanguage"],
+): string[] {
   const sectionTitle = language === "ja" ? "明日やること" : "Next actions";
   return sectionLines(reportMarkdown, sectionTitle)
     .filter((line) => /^-\s+/.test(line))
-    .map((line) => line.replace(/^-\s+/, "").replace(/[:：].*$/, "").trim())
+    .map((line) =>
+      line
+        .replace(/^-\s+/, "")
+        .replace(/[:：].*$/, "")
+        .trim(),
+    )
     .filter(Boolean);
 }
 
@@ -136,7 +187,10 @@ function joinEnglish(items: string[]): string {
   return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
 }
 
-export async function sendSlackNotification(webhookUrl: string | undefined, text: string): Promise<void> {
+export async function sendSlackNotification(
+  webhookUrl: string | undefined,
+  text: string,
+): Promise<void> {
   if (!webhookUrl) {
     return;
   }
@@ -145,13 +199,15 @@ export async function sendSlackNotification(webhookUrl: string | undefined, text
   const response = await fetch(webhookUrl, {
     method: "POST",
     headers: {
-      "Content-Type": "application/json"
+      "Content-Type": "application/json",
     },
-    body: JSON.stringify(payload)
+    body: JSON.stringify(payload),
   });
 
   if (!response.ok) {
-    throw new Error(`Slack webhook request failed with status ${response.status}.`);
+    throw new Error(
+      `Slack webhook request failed with status ${response.status}.`,
+    );
   }
 }
 
