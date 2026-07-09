@@ -26,6 +26,9 @@ async function main(): Promise<void> {
     if (result.reportHtmlPath) {
       core.setOutput("report-html-path", result.reportHtmlPath);
     }
+    if (result.reportPdfPath) {
+      core.setOutput("report-pdf-path", result.reportPdfPath);
+    }
     core.setOutput("report-markdown", result.reportMarkdown);
 
     if (config.commitReport) {

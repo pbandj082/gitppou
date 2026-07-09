@@ -45,6 +45,7 @@ describe("readActionConfig", () => {
       reportLanguage: "ja",
       reportFormats: ["markdown"],
       reportHtmlDir: ".gitppou/site",
+      reportPdfDir: ".gitppou/pdf",
       commitReport: true,
       slackNotify: false,
       llmProvider: "template",

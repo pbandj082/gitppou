@@ -65,7 +65,9 @@ report:
   formats:
     - markdown
     # - html
+    # - pdf
   # htmlDir: .gitppou/site
+  # pdfDir: .gitppou/pdf
 
 llm:
   provider: github-models
@@ -97,16 +99,19 @@ report:
   formats:
     - markdown
     - html
+    - pdf
   htmlDir: .gitppou/site
+  pdfDir: .gitppou/pdf
 ```
 
-The HTML report path is:
+The generated HTML and PDF report paths are:
 
 ```text
 .gitppou/site/YYYY-MM/YYYY-MM-DD.html
+.gitppou/pdf/YYYY-MM/YYYY-MM-DD.pdf
 ```
 
-When HTML output is enabled, Slack links and the `report-path` action output point to the HTML file. `report-paths` contains every generated file path.
+When HTML or PDF output is enabled, `report-path` points to the richest generated format, preferring PDF, then HTML, then Markdown. `report-paths` contains every generated file path.
 
 ## Required Permissions
 
@@ -187,12 +192,13 @@ GitHub does not allow custom repository secret names that start with `GITHUB_`. 
 
 Secrets must be passed via `env`, not `with`.
 
-| Variable                             | Required               | Description                                                                                                                          |
-| ------------------------------------ | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| Default GitHub token env var         | Yes                    | Environment variable named by `github.tokenEnv`; `GITHUB_TOKEN` by default. Used for activity collection fallback and GitHub Models. |
-| Owner-specific GitHub token env vars | Only for mapped owners | Additional tokens referenced by `github.tokens`.                                                                                     |
-| `BACKLOG_API_KEY`                    | Yes                    | Backlog API key.                                                                                                                     |
-| `SLACK_WEBHOOK_URL`                  | Only for Slack         | Slack Incoming Webhook URL.                                                                                                          |
+| Variable                             | Required                         | Description                                                                                                                          |
+| ------------------------------------ | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| Default GitHub token env var         | Yes                              | Environment variable named by `github.tokenEnv`; `GITHUB_TOKEN` by default. Used for activity collection fallback and GitHub Models. |
+| Owner-specific GitHub token env vars | Only for mapped owners           | Additional tokens referenced by `github.tokens`.                                                                                     |
+| `BACKLOG_API_KEY`                    | Yes                              | Backlog API key.                                                                                                                     |
+| `SLACK_WEBHOOK_URL`                  | Only for Slack                   | Slack Incoming Webhook URL.                                                                                                          |
+| `GITPPOU_CHROME_PATH`                | Only for custom PDF environments | Chrome or Chromium executable path for PDF output when auto-detection is not enough.                                                 |
 
 Do not hard-code these values. Store them in GitHub Actions Secrets.
 
@@ -322,11 +328,11 @@ env:
   SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
 ```
 
-Slack receives a short prose summary, not the full raw activity. With `llm.provider: github-models`, the Slack summary is generated from the final report; otherwise Gitppou falls back to a local heading-based summary. When running in GitHub Actions, the summary includes the actor, workflow, repository/ref, and a link to the generated report file in the repository. If HTML output is enabled, that link points to the HTML report. Slack failures are warnings in v1 and do not fail the action.
+Slack receives a short prose summary, not the full raw activity. With `llm.provider: github-models`, the Slack summary is generated from the final report; otherwise Gitppou falls back to a local heading-based summary. When running in GitHub Actions, the summary includes the actor, workflow, repository/ref, and a list of links to every generated report file in the repository. Slack failures are warnings in v1 and do not fail the action.
 
-## HTML Reports
+## HTML and PDF Reports
 
-HTML output is optional. It renders the same Markdown report into a standalone HTML file with GitHub-flavored Markdown styling and Mermaid support. Raw HTML in the report body is escaped.
+HTML and PDF output are optional. HTML renders the same Markdown report into a standalone HTML file with GitHub-flavored Markdown styling and Mermaid support. PDF output prints that HTML with Chrome or Chromium. Raw HTML in the report body is escaped.
 
 Use `report.formats` to choose saved files:
 
@@ -335,11 +341,19 @@ report:
   formats:
     - markdown
     - html
+    - pdf
   dir: reports
   htmlDir: .gitppou/site
+  pdfDir: .gitppou/pdf
 ```
 
-This keeps the source Markdown in `reports/` and the distributable HTML in `.gitppou/site/`. If you later enable GitHub Pages, use a Pages workflow to upload `htmlDir` as the Pages artifact, or choose `docs` as `htmlDir` when using branch-based Pages publishing.
+This keeps the source Markdown in `reports/`, the distributable HTML in `.gitppou/site/`, and PDFs in `.gitppou/pdf/`. If you later enable GitHub Pages, use a Pages workflow to upload `htmlDir` as the Pages artifact, or choose `docs` as `htmlDir` when using branch-based Pages publishing.
+
+PDF output requires Chrome or Chromium in the runtime environment. GitHub-hosted Ubuntu runners include a compatible browser. For custom runners or local preview, install Chrome or set:
+
+```sh
+GITPPOU_CHROME_PATH=/path/to/chrome
+```
 
 ## Commit Behavior
 

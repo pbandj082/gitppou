@@ -36156,7 +36156,7 @@ exports.visitAsync = visitAsync;
 /* harmony import */ var node_fs_promises__WEBPACK_IMPORTED_MODULE_0__ = __nccwpck_require__(1455);
 /* harmony import */ var node_path__WEBPACK_IMPORTED_MODULE_1__ = __nccwpck_require__(6760);
 /* harmony import */ var _actions_core__WEBPACK_IMPORTED_MODULE_2__ = __nccwpck_require__(4442);
-/* harmony import */ var _gitppou_core__WEBPACK_IMPORTED_MODULE_3__ = __nccwpck_require__(76);
+/* harmony import */ var _gitppou_core__WEBPACK_IMPORTED_MODULE_3__ = __nccwpck_require__(1103);
 /* harmony import */ var yaml__WEBPACK_IMPORTED_MODULE_4__ = __nccwpck_require__(3328);
 
 
@@ -36384,7 +36384,7 @@ async function gitExit(args) {
 
 __nccwpck_require__.a(__webpack_module__, async (__webpack_handle_async_dependencies__, __webpack_async_result__) => { try {
 /* harmony import */ var _actions_core__WEBPACK_IMPORTED_MODULE_0__ = __nccwpck_require__(4442);
-/* harmony import */ var _gitppou_core__WEBPACK_IMPORTED_MODULE_1__ = __nccwpck_require__(76);
+/* harmony import */ var _gitppou_core__WEBPACK_IMPORTED_MODULE_1__ = __nccwpck_require__(1103);
 /* harmony import */ var _config_js__WEBPACK_IMPORTED_MODULE_2__ = __nccwpck_require__(9820);
 /* harmony import */ var _git_js__WEBPACK_IMPORTED_MODULE_3__ = __nccwpck_require__(288);
 
@@ -36409,6 +36409,9 @@ async function main() {
         _actions_core__WEBPACK_IMPORTED_MODULE_0__.setOutput("report-paths", result.reportPaths.join("\n"));
         if (result.reportHtmlPath) {
             _actions_core__WEBPACK_IMPORTED_MODULE_0__.setOutput("report-html-path", result.reportHtmlPath);
+        }
+        if (result.reportPdfPath) {
+            _actions_core__WEBPACK_IMPORTED_MODULE_0__.setOutput("report-pdf-path", result.reportPdfPath);
         }
         _actions_core__WEBPACK_IMPORTED_MODULE_0__.setOutput("report-markdown", result.reportMarkdown);
         if (config.commitReport) {
@@ -36440,7 +36443,7 @@ __webpack_async_result__();
 
 /***/ }),
 
-/***/ 76:
+/***/ 1103:
 /***/ ((__unused_webpack___webpack_module__, __webpack_exports__, __nccwpck_require__) => {
 
 
@@ -36451,7 +36454,7 @@ __nccwpck_require__.d(__webpack_exports__, {
   g4: () => (/* reexport */ sendSlackNotification)
 });
 
-// UNUSED EXPORTS: DEFAULT_LLM_MAX_INPUT_CHARS, DEFAULT_LLM_MODEL, DEFAULT_LLM_PROVIDER, DEFAULT_LLM_STYLE, DEFAULT_REPORT_LANGUAGE, DEFAULT_REPORT_TIMEZONE, assertValidDateString, assertValidTimeZone, buildReportHtmlPath, buildReportPath, extractIssueKeys, fetchBacklogActivities, fetchGitHubActivities, formatDateInTimeZone, generateSlackSummary, getReportDateRange, groupActivitiesByIssueKey, isOnReportDate, normalizeActivities, parseCommaSeparatedList, parseGitHubRepoSpecString, parseLlmProvider, parseLlmStyle, parseReportLanguage, resolveGitHubTokenForOwner, resolveReportDate
+// UNUSED EXPORTS: DEFAULT_LLM_MAX_INPUT_CHARS, DEFAULT_LLM_MODEL, DEFAULT_LLM_PROVIDER, DEFAULT_LLM_STYLE, DEFAULT_REPORT_LANGUAGE, DEFAULT_REPORT_TIMEZONE, assertValidDateString, assertValidTimeZone, buildReportHtmlPath, buildReportPath, buildReportPdfPath, extractIssueKeys, fetchBacklogActivities, fetchGitHubActivities, formatDateInTimeZone, generateSlackSummary, getReportDateRange, groupActivitiesByIssueKey, isOnReportDate, normalizeActivities, parseCommaSeparatedList, parseGitHubRepoSpecString, parseLlmProvider, parseLlmStyle, parseReportLanguage, resolveGitHubTokenForOwner, resolveReportDate
 
 ;// CONCATENATED MODULE: ../core/dist/config.js
 const DEFAULT_REPORT_LANGUAGE = "en";
@@ -36638,6 +36641,7 @@ function buildGitppouConfig(rawConfig, options, env, now = new Date()) {
             "reports",
         reportFormats: getReportFormats(report),
         reportHtmlDir: getString(report, "htmlDir", "config.report.htmlDir") ?? ".gitppou/site",
+        reportPdfDir: getString(report, "pdfDir", "config.report.pdfDir") ?? ".gitppou/pdf",
         commitReport: options.commitReport ??
             getOptionalBoolean(git, "commitReport", "config.git.commitReport") ??
             false,
@@ -36686,10 +36690,10 @@ function getReportFormats(report) {
     return [...new Set(parsed)];
 }
 function parseReportFormat(value, pathLabel) {
-    if (value === "markdown" || value === "html") {
+    if (value === "markdown" || value === "html" || value === "pdf") {
         return value;
     }
-    throw new Error(`${pathLabel} must contain only markdown or html.`);
+    throw new Error(`${pathLabel} must contain only markdown, html, or pdf.`);
 }
 function getSection(root, key) {
     const value = root[key];
@@ -44009,20 +44013,124 @@ function normalize_escapeRegExp(value) {
     return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+;// CONCATENATED MODULE: external "node:child_process"
+const external_node_child_process_namespaceObject = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("node:child_process");
+;// CONCATENATED MODULE: external "node:os"
+const external_node_os_namespaceObject = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("node:os");
+;// CONCATENATED MODULE: external "node:url"
+const external_node_url_namespaceObject = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("node:url");
+;// CONCATENATED MODULE: ../core/dist/pdf.js
+
+
+
+
+
+const CHROME_CANDIDATES = [
+    "google-chrome",
+    "google-chrome-stable",
+    "chromium",
+    "chromium-browser",
+    "microsoft-edge",
+];
+async function saveReportPdf(html, pdfPath) {
+    const absolutePdfPath = external_node_path_.resolve(pdfPath);
+    await (0,promises_.mkdir)(external_node_path_.dirname(absolutePdfPath), { recursive: true });
+    const chromePath = await resolveChromeExecutable();
+    const tempDir = await (0,promises_.mkdtemp)(external_node_path_.join(external_node_os_namespaceObject.tmpdir(), "gitppou-pdf-"));
+    try {
+        const htmlPath = external_node_path_.join(tempDir, "report.html");
+        await (0,promises_.writeFile)(htmlPath, html, "utf8");
+        await runChrome(chromePath, [
+            "--headless",
+            "--disable-gpu",
+            "--disable-dev-shm-usage",
+            "--no-sandbox",
+            "--no-pdf-header-footer",
+            "--run-all-compositor-stages-before-draw",
+            "--virtual-time-budget=10000",
+            `--print-to-pdf=${absolutePdfPath}`,
+            (0,external_node_url_namespaceObject.pathToFileURL)(htmlPath).href,
+        ]);
+    }
+    finally {
+        await (0,promises_.rm)(tempDir, { recursive: true, force: true });
+    }
+}
+async function resolveChromeExecutable() {
+    const configured = process.env.GITPPOU_CHROME_PATH?.trim() ||
+        process.env.CHROME_PATH?.trim() ||
+        process.env.PUPPETEER_EXECUTABLE_PATH?.trim();
+    if (configured) {
+        if (await canRun(configured)) {
+            return configured;
+        }
+        throw new Error(`Configured Chrome executable cannot be run: ${configured}`);
+    }
+    for (const candidate of CHROME_CANDIDATES) {
+        if (await canRun(candidate)) {
+            return candidate;
+        }
+    }
+    throw new Error("PDF report output requires Google Chrome or Chromium. Install Chrome or set GITPPOU_CHROME_PATH.");
+}
+function canRun(command) {
+    return new Promise((resolve) => {
+        const child = (0,external_node_child_process_namespaceObject.spawn)(command, ["--version"], {
+            stdio: "ignore",
+        });
+        child.on("error", () => resolve(false));
+        child.on("exit", (code) => resolve(code === 0));
+    });
+}
+function runChrome(command, args) {
+    return new Promise((resolve, reject) => {
+        const stderr = [];
+        const child = (0,external_node_child_process_namespaceObject.spawn)(command, args, {
+            stdio: ["ignore", "ignore", "pipe"],
+        });
+        child.stderr.on("data", (chunk) => {
+            stderr.push(String(chunk));
+        });
+        child.on("error", (error) => {
+            reject(new Error(`Failed to run Chrome for PDF output. ${error.message}`));
+        });
+        child.on("close", (code) => {
+            if (code === 0) {
+                resolve();
+                return;
+            }
+            reject(new Error(`Chrome PDF generation failed with exit code ${code ?? "unknown"}. ${pdf_truncate(stderr.join("").trim(), 500)}`));
+        });
+    });
+}
+function pdf_truncate(value, maxChars) {
+    if (value.length <= maxChars) {
+        return value;
+    }
+    return `${value.slice(0, maxChars)}...`;
+}
+
 ;// CONCATENATED MODULE: ../core/dist/slack.js
-function generateSlackSummary(config, reportPath, reportMarkdown, summaryText) {
+function generateSlackSummary(config, reportPathOrPaths, reportMarkdown, summaryText) {
     const isJapanese = config.reportLanguage === "ja";
-    const title = isJapanese ? `日報 ${config.reportDate}` : `Daily Report - ${config.reportDate}`;
+    const title = isJapanese
+        ? `日報 ${config.reportDate}`
+        : `Daily Report - ${config.reportDate}`;
     const detailsLabel = isJapanese ? "詳細" : "Details";
     const contextLine = githubActionsContextLine(config.githubActionsContext);
-    const details = reportDetails(reportPath, config.githubActionsContext);
-    const summary = slack_cleanSummaryText(summaryText) ?? localReportSummary(reportMarkdown, config.reportLanguage);
+    const reportPaths = Array.isArray(reportPathOrPaths)
+        ? reportPathOrPaths
+        : [reportPathOrPaths];
+    const details = reportPaths.map((reportPath) => `- ${reportDetails(reportPath, config.githubActionsContext)}`);
+    const summary = slack_cleanSummaryText(summaryText) ??
+        localReportSummary(reportMarkdown, config.reportLanguage);
     const lines = [
         title,
         ...(contextLine ? [contextLine] : []),
-        `${detailsLabel}: ${details}`,
+        `${detailsLabel}:`,
+        ...details,
         "",
-        summary
+        summary,
     ];
     return slack_truncate(lines.join("\n"), 3500);
 }
@@ -44030,8 +44138,18 @@ function githubActionsContextLine(context) {
     if (!context) {
         return undefined;
     }
-    const workflow = [context.workflow, context.runNumber ? `#${context.runNumber}` : undefined].filter(Boolean).join(" ");
-    const repository = [context.repository, context.refName ? `(${context.refName})` : undefined].filter(Boolean).join(" ");
+    const workflow = [
+        context.workflow,
+        context.runNumber ? `#${context.runNumber}` : undefined,
+    ]
+        .filter(Boolean)
+        .join(" ");
+    const repository = [
+        context.repository,
+        context.refName ? `(${context.refName})` : undefined,
+    ]
+        .filter(Boolean)
+        .join(" ");
     const actor = context.actor ? `by ${context.actor}` : undefined;
     const parts = [actor, workflow || undefined, repository || undefined].filter((part) => Boolean(part));
     return parts.length > 0 ? parts.join(" / ") : undefined;
@@ -44064,13 +44182,17 @@ function localReportSummary(reportMarkdown, language) {
         if (workItems.length === 0) {
             return "本日のユーザー行動は見つかりませんでした。詳細はリンク先の日報を確認してください。";
         }
-        const next = nextItems.length > 0 ? `明日は${joinJapanese(nextItems)}を確認・対応する予定です。` : "";
+        const next = nextItems.length > 0
+            ? `明日は${joinJapanese(nextItems)}を確認・対応する予定です。`
+            : "";
         return `本日は${joinJapanese(workItems)}を中心に対応しました。${next}`;
     }
     if (workItems.length === 0) {
         return "No user activity was found for this date. See the linked report for details.";
     }
-    const next = nextItems.length > 0 ? ` Next actions focus on ${joinEnglish(nextItems)}.` : "";
+    const next = nextItems.length > 0
+        ? ` Next actions focus on ${joinEnglish(nextItems)}.`
+        : "";
     return `Worked mainly on ${joinEnglish(workItems)}.${next}`;
 }
 function sectionHeadings(reportMarkdown, sectionTitle) {
@@ -44083,7 +44205,10 @@ function nextActionItems(reportMarkdown, language) {
     const sectionTitle = language === "ja" ? "明日やること" : "Next actions";
     return sectionLines(reportMarkdown, sectionTitle)
         .filter((line) => /^-\s+/.test(line))
-        .map((line) => line.replace(/^-\s+/, "").replace(/[:：].*$/, "").trim())
+        .map((line) => line
+        .replace(/^-\s+/, "")
+        .replace(/[:：].*$/, "")
+        .trim())
         .filter(Boolean);
 }
 function sectionLines(reportMarkdown, sectionTitle) {
@@ -44119,9 +44244,9 @@ async function sendSlackNotification(webhookUrl, text) {
     const response = await fetch(webhookUrl, {
         method: "POST",
         headers: {
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
         },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(payload),
     });
     if (!response.ok) {
         throw new Error(`Slack webhook request failed with status ${response.status}.`);
@@ -44135,6 +44260,7 @@ function slack_truncate(value, maxChars) {
 }
 
 ;// CONCATENATED MODULE: ../core/dist/report.js
+
 
 
 
@@ -44177,17 +44303,27 @@ async function generateDailyReport(config) {
     const reportHtmlPath = formats.includes("html")
         ? buildReportHtmlPath(config.reportHtmlDir, config.reportDate)
         : undefined;
+    const reportPdfPath = formats.includes("pdf")
+        ? buildReportPdfPath(config.reportPdfDir, config.reportDate)
+        : undefined;
+    const reportHtml = reportHtmlPath || reportPdfPath
+        ? renderReportHtml(reportMarkdown, config)
+        : undefined;
     if (formats.includes("markdown")) {
         await saveReport(markdownPath, reportMarkdown);
         reportPaths.push(markdownPath);
     }
-    if (reportHtmlPath) {
-        await saveReport(reportHtmlPath, renderReportHtml(reportMarkdown, config));
+    if (reportHtmlPath && reportHtml) {
+        await saveReport(reportHtmlPath, reportHtml);
         reportPaths.push(reportHtmlPath);
     }
+    if (reportPdfPath && reportHtml) {
+        await saveReportPdf(reportHtml, reportPdfPath);
+        reportPaths.push(reportPdfPath);
+    }
     const slackSummaryText = await generateSlackSummaryText(config, reportMarkdown);
-    const primaryReportPath = reportHtmlPath ?? markdownPath;
-    const slackSummary = generateSlackSummary(config, primaryReportPath, reportMarkdown, slackSummaryText);
+    const primaryReportPath = reportPdfPath ?? reportHtmlPath ?? markdownPath;
+    const slackSummary = generateSlackSummary(config, reportPaths, reportMarkdown, slackSummaryText);
     if (config.slackNotify && !config.deferSlackNotification) {
         try {
             await sendSlackNotification(config.slackWebhookUrl, slackSummary);
@@ -44199,6 +44335,7 @@ async function generateDailyReport(config) {
     return {
         reportPath: primaryReportPath,
         ...(reportHtmlPath ? { reportHtmlPath } : {}),
+        ...(reportPdfPath ? { reportPdfPath } : {}),
         reportPaths,
         reportMarkdown,
         slackSummary,
@@ -44245,6 +44382,9 @@ function buildReportPath(reportDir, reportDate) {
 }
 function buildReportHtmlPath(reportHtmlDir, reportDate) {
     return buildDatedReportPath(reportHtmlDir, reportDate, "html", "report.htmlDir");
+}
+function buildReportPdfPath(reportPdfDir, reportDate) {
+    return buildDatedReportPath(reportPdfDir, reportDate, "pdf", "report.pdfDir");
 }
 async function saveReport(reportPath, contents) {
     const absolutePath = external_node_path_.resolve(reportPath);

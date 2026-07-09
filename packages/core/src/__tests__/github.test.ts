@@ -23,6 +23,7 @@ const baseConfig: GitppouConfig = {
   reportDir: "reports",
   reportFormats: ["markdown"],
   reportHtmlDir: ".gitppou/site",
+  reportPdfDir: ".gitppou/pdf",
   commitReport: false,
   slackNotify: false,
   llmProvider: "template",

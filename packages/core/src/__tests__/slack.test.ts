@@ -14,6 +14,7 @@ const baseConfig: GitppouConfig = {
   reportDir: "reports",
   reportFormats: ["markdown"],
   reportHtmlDir: ".gitppou/site",
+  reportPdfDir: ".gitppou/pdf",
   commitReport: false,
   slackNotify: true,
   llmProvider: "template",
@@ -60,7 +61,10 @@ describe("generateSlackSummary", () => {
       "by octocat / Daily Report #42 / owner/repo (main)",
     );
     expect(summary).toContain(
-      "詳細: <https://github.com/owner/repo/blob/main/.gitppou/reports/2026-07/2026-07-06.md|.gitppou/reports/2026-07/2026-07-06.md>",
+      [
+        "詳細:",
+        "- <https://github.com/owner/repo/blob/main/.gitppou/reports/2026-07/2026-07-06.md|.gitppou/reports/2026-07/2026-07-06.md>",
+      ].join("\n"),
     );
     expect(summary).toContain(
       "ログイン導線の修正を進め、PR更新と明日の確認事項を整理しました。",
@@ -68,6 +72,41 @@ describe("generateSlackSummary", () => {
     expect(summary).not.toContain("- APP-1 Login flow");
     expect(summary).not.toContain("actions/runs/123456789");
     expect(summary).not.toContain("課題・相談:");
+  });
+
+  it("lists every generated report file link", () => {
+    const summary = generateSlackSummary(
+      {
+        ...baseConfig,
+        githubActionsContext: {
+          refName: "main",
+          repository: "owner/repo",
+          serverUrl: "https://github.com",
+        },
+      },
+      [
+        ".gitppou/reports/2026-07/2026-07-06.md",
+        ".gitppou/site/2026-07/2026-07-06.html",
+        ".gitppou/pdf/2026-07/2026-07-06.pdf",
+      ],
+      [
+        "# 日報 - 2026-07-06",
+        "",
+        "## 本日対応したこと",
+        "",
+        "### APP-1 Login flow",
+      ].join("\n"),
+    );
+
+    expect(summary).toContain(
+      "- <https://github.com/owner/repo/blob/main/.gitppou/reports/2026-07/2026-07-06.md|.gitppou/reports/2026-07/2026-07-06.md>",
+    );
+    expect(summary).toContain(
+      "- <https://github.com/owner/repo/blob/main/.gitppou/site/2026-07/2026-07-06.html|.gitppou/site/2026-07/2026-07-06.html>",
+    );
+    expect(summary).toContain(
+      "- <https://github.com/owner/repo/blob/main/.gitppou/pdf/2026-07/2026-07-06.pdf|.gitppou/pdf/2026-07/2026-07-06.pdf>",
+    );
   });
 
   it("uses plain heading text when local summaries read linked headings", () => {

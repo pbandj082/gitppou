@@ -34,7 +34,9 @@ report:
   formats:
     - markdown
     # - html
+    # - pdf
   # htmlDir: .gitppou/site
+  # pdfDir: .gitppou/pdf
 
 llm:
   provider: template

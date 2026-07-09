@@ -49,6 +49,7 @@ export {
 } from "./normalize.js";
 export {
   buildReportHtmlPath,
+  buildReportPdfPath,
   buildReportPath,
   generateDailyReport,
 } from "./report.js";
