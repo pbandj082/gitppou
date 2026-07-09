@@ -17,6 +17,7 @@ on:
   workflow_dispatch:
 
 permissions:
+  actions: read
   contents: write
   issues: read
   pull-requests: read
@@ -91,6 +92,7 @@ For template mode without committing:
 
 ```yaml
 permissions:
+  actions: read
   contents: read
   issues: read
   pull-requests: read
@@ -100,6 +102,7 @@ For GitHub Models:
 
 ```yaml
 permissions:
+  actions: read
   contents: read
   issues: read
   pull-requests: read
@@ -110,11 +113,14 @@ For committing reports:
 
 ```yaml
 permissions:
+  actions: read
   contents: write
   issues: read
   pull-requests: read
   models: read
 ```
+
+`actions: read` lets Gitppou resolve the original workflow run creation time. If `report.date` is omitted, rerunning a failed workflow still generates the report for the original run date instead of the rerun date. Set `report.date` explicitly when you want to override this behavior.
 
 If you need to scan private repositories outside the workflow repository, use a fine-grained personal access token with the minimum required permissions:
 
