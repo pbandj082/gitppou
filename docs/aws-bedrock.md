@@ -44,11 +44,7 @@ For GitHub Actions, use OIDC to assume an IAM role with short-lived credentials 
 
 [`cloudformation/github-oidc-bedrock-role.yml`](../cloudformation/github-oidc-bedrock-role.yml) creates an IAM role with a trust policy restricted to one GitHub repository and branch (or GitHub Environment). It also creates the `token.actions.githubusercontent.com` OIDC provider unless it already exists in the AWS account.
 
-For this public repository, use the following link to open the CloudFormation create-stack page in the AWS Tokyo Region with the template, stack name, repository, branch, and default Bedrock model prefilled:
-
-[Launch the Gitppou Bedrock OIDC stack](https://ap-northeast-1.console.aws.amazon.com/cloudformation/home?region=ap-northeast-1#/stacks/create/review?templateURL=https%3A%2F%2Fraw.githubusercontent.com%2Fpbandj082%2Fgitppou%2Fmain%2Fcloudformation%2Fgithub-oidc-bedrock-role.yml&stackName=GitppouBedrockGitHubActions&param_GitHubRepository=pbandj082%2Fgitppou&param_GitHubBranch=main&param_BedrockModelId=jp.amazon.nova-2-lite-v1%3A0)
-
-The link opens the AWS sign-in page first when needed. CloudFormation still requires confirmation before creating the stack, including acknowledgement that it creates IAM resources.
+In the CloudFormation console, choose **Create stack**, select **With new resources (standard)**, then select **Upload a template file** and upload `cloudformation/github-oidc-bedrock-role.yml`. CloudFormation requires acknowledgement that the stack creates IAM resources.
 
 Before creating the stack:
 
