@@ -10,7 +10,6 @@ permissions:
   contents: read
   issues: read
   pull-requests: read
-  models: read
 
 jobs:
   daily-report:
@@ -19,7 +18,6 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      # Set llm.provider: github-models in gitppou.yml to use GitHub Models.
       - uses: your-org/gitppou@v1
         with:
           config: gitppou.yml

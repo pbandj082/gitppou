@@ -25,8 +25,10 @@ Reports may contain:
 - Personal names.
 - Private comments.
 
-## GitHub Models
+## External LLM Providers
 
 Template mode does not send activity data to an external LLM.
 
-When `llm.provider` is set to `github-models`, normalized GitHub and Backlog activity data is sent to GitHub Models. The final generated report Markdown may also be sent to GitHub Models to create the Slack notification summary. Limit the amount of data sent with `llm.maxInputChars`.
+When `llm.provider` is `openai` or `aws-bedrock`, normalized GitHub and Backlog activity data is sent to the selected provider. The final generated report Markdown is also sent to that provider when Gitppou creates a Slack summary. Limit the amount of activity data sent with `llm.maxInputChars`.
+
+See [OpenAI](openai.md) and [AWS Bedrock](aws-bedrock.md) for provider-specific credential and access setup.

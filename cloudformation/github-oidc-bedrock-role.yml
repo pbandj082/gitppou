@@ -1,0 +1,111 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Creates a GitHub Actions OIDC provider when needed and an IAM role for
+  Gitppou to invoke a selected Amazon Bedrock model or inference profile.
+
+Parameters:
+  GitHubRepository:
+    Type: String
+    Description: GitHub repository allowed to assume the role, in OWNER/REPOSITORY form.
+    AllowedPattern: "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+
+  GitHubBranch:
+    Type: String
+    Default: main
+    Description: Branch name allowed to assume the role. Ignored when GitHubEnvironment is set.
+
+  GitHubEnvironment:
+    Type: String
+    Default: ""
+    Description: Optional GitHub Environment name allowed to assume the role.
+
+  RoleName:
+    Type: String
+    Default: GitppouBedrockGitHubActions
+    Description: Name of the IAM role created for GitHub Actions.
+    AllowedPattern: "^[A-Za-z0-9_+=,.@-]{1,64}$"
+
+  CreateGitHubOidcProvider:
+    Type: String
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: Set false when token.actions.githubusercontent.com already exists as an IAM OIDC provider in this AWS account.
+
+  BedrockModelId:
+    Type: String
+    Default: jp.amazon.nova-2-lite-v1:0
+    Description: Foundation model ID or inference profile ID. It must match llm.model in gitppou.yml.
+
+Conditions:
+  CreateOidcProvider: !Equals [!Ref CreateGitHubOidcProvider, "true"]
+  UseGitHubEnvironment: !Not [!Equals [!Ref GitHubEnvironment, ""]]
+
+Resources:
+  GitHubOidcProvider:
+    Type: AWS::IAM::OIDCProvider
+    Condition: CreateOidcProvider
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList:
+        - sts.amazonaws.com
+
+  GitppouBedrockRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Ref RoleName
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !If
+                - CreateOidcProvider
+                - !GetAtt GitHubOidcProvider.Arn
+                - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:oidc-provider/token.actions.githubusercontent.com"
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+                token.actions.githubusercontent.com:sub: !If
+                  - UseGitHubEnvironment
+                  - !Sub "repo:${GitHubRepository}:environment:${GitHubEnvironment}"
+                  - !Sub "repo:${GitHubRepository}:ref:refs/heads/${GitHubBranch}"
+      Policies:
+        - PolicyName: InvokeConfiguredBedrockModel
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: InvokeModel
+                Effect: Allow
+                Action: bedrock:InvokeModel
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/${BedrockModelId}"
+                  - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/${BedrockModelId}"
+
+Outputs:
+  RoleArn:
+    Description: Set this value as the AWS_BEDROCK_ROLE_ARN GitHub Actions secret.
+    Value: !GetAtt GitppouBedrockRole.Arn
+
+  RoleName:
+    Description: Name of the IAM role used by GitHub Actions.
+    Value: !Ref GitppouBedrockRole
+
+  GitHubSubject:
+    Description: GitHub OIDC subject allowed by the role trust policy.
+    Value: !If
+      - UseGitHubEnvironment
+      - !Sub "repo:${GitHubRepository}:environment:${GitHubEnvironment}"
+      - !Sub "repo:${GitHubRepository}:ref:refs/heads/${GitHubBranch}"
+
+  GitHubOidcProviderArn:
+    Description: IAM OIDC provider used by the role.
+    Value: !If
+      - CreateOidcProvider
+      - !GetAtt GitHubOidcProvider.Arn
+      - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:oidc-provider/token.actions.githubusercontent.com"

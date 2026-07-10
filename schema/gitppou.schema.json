@@ -143,8 +143,11 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "provider": { "type": "string", "enum": ["template", "github-models"] },
+        "provider": { "type": "string", "enum": ["template", "openai", "aws-bedrock"] },
         "model": { "type": "string" },
+        "apiKeyEnv": { "type": "string" },
+        "region": { "type": "string" },
+        "profile": { "type": "string" },
         "maxInputChars": { "type": "integer", "minimum": 1 },
         "style": { "type": "string", "enum": ["concise", "detailed"] }
       }
