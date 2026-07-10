@@ -1,0 +1,29 @@
+name: Gitppou Daily Report with OpenAI
+
+on:
+  schedule:
+    - cron: "0 9 * * 1-5"
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+  issues: read
+  pull-requests: read
+
+jobs:
+  daily-report:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      # Set llm.provider: openai in gitppou.yml.
+      - uses: your-org/gitppou@v1
+        with:
+          config: gitppou.yml
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          BACKLOG_API_KEY: ${{ secrets.BACKLOG_API_KEY }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

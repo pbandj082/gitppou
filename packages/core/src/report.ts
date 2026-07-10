@@ -6,8 +6,8 @@ import { renderReportHtml } from "./html.js";
 import {
   applyTemplateProvider,
   generateTemplateReport,
-  refineWithGitHubModels,
-  summarizeSlackWithGitHubModels,
+  refineWithLlm,
+  summarizeSlackWithLlm,
 } from "./llm/index.js";
 import { normalizeMarkdownLinks } from "./markdown.js";
 import { groupActivitiesByIssueKey, normalizeActivities } from "./normalize.js";
@@ -41,19 +41,13 @@ export async function generateDailyReport(
   });
   let reportMarkdown = applyTemplateProvider(templateDraft);
 
-  if (config.llmProvider === "github-models") {
-    try {
-      reportMarkdown = await refineWithGitHubModels({
-        config,
-        templateDraft,
-        activities,
-        groups: actionGroups,
-      });
-    } catch (error) {
-      console.warn(
-        `Gitppou warning: GitHub Models failed; using template report. ${formatError(error)}`,
-      );
-    }
+  if (config.llmProvider !== "template") {
+    reportMarkdown = await refineWithLlm({
+      config,
+      templateDraft,
+      activities,
+      groups: actionGroups,
+    });
   }
   reportMarkdown = addReportMetadataLine(
     normalizeMarkdownLinks(reportMarkdown),
@@ -198,21 +192,14 @@ async function generateSlackSummaryText(
   config: GitppouConfig,
   reportMarkdown: string,
 ): Promise<string | undefined> {
-  if (!config.slackNotify || config.llmProvider !== "github-models") {
+  if (!config.slackNotify || config.llmProvider === "template") {
     return undefined;
   }
 
-  try {
-    return await summarizeSlackWithGitHubModels({
-      config,
-      reportMarkdown,
-    });
-  } catch (error) {
-    console.warn(
-      `Gitppou warning: GitHub Models Slack summary failed; using local summary. ${formatError(error)}`,
-    );
-    return undefined;
-  }
+  return summarizeSlackWithLlm({
+    config,
+    reportMarkdown,
+  });
 }
 
 async function fetchActivities(

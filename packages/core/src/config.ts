@@ -4,11 +4,19 @@ export const DEFAULT_REPORT_LANGUAGE: ReportLanguage = "en";
 export const DEFAULT_REPORT_TIMEZONE = "Asia/Tokyo";
 export const DEFAULT_LLM_PROVIDER: LlmProviderName = "template";
 export const DEFAULT_LLM_MODEL = "openai/gpt-4o-mini";
+export const DEFAULT_OPENAI_MODEL = "gpt-5-nano";
+export const DEFAULT_AWS_BEDROCK_MODEL = "jp.amazon.nova-2-lite-v1:0";
+export const DEFAULT_AWS_REGION = "ap-northeast-1";
 export const DEFAULT_LLM_MAX_INPUT_CHARS = 20_000;
 export const DEFAULT_LLM_STYLE: LlmStyle = "concise";
 
 const REPORT_LANGUAGES = new Set<ReportLanguage>(["en", "ja"]);
-const LLM_PROVIDERS = new Set<LlmProviderName>(["template", "github-models"]);
+const LLM_PROVIDERS = new Set<LlmProviderName>([
+  "template",
+  "github-models",
+  "openai",
+  "aws-bedrock",
+]);
 const LLM_STYLES = new Set<LlmStyle>(["concise", "detailed"]);
 
 export function parseReportLanguage(value: string): ReportLanguage {
@@ -16,7 +24,9 @@ export function parseReportLanguage(value: string): ReportLanguage {
     return value as ReportLanguage;
   }
 
-  throw new Error(`Unsupported report-language "${value}". Supported values are en and ja.`);
+  throw new Error(
+    `Unsupported report-language "${value}". Supported values are en and ja.`,
+  );
 }
 
 export function parseLlmProvider(value: string): LlmProviderName {
@@ -24,7 +34,21 @@ export function parseLlmProvider(value: string): LlmProviderName {
     return value as LlmProviderName;
   }
 
-  throw new Error(`Unsupported llm-provider "${value}". Supported values are template and github-models.`);
+  throw new Error(
+    `Unsupported llm-provider "${value}". Supported values are template, github-models, openai, and aws-bedrock.`,
+  );
+}
+
+export function defaultLlmModel(provider: LlmProviderName): string {
+  switch (provider) {
+    case "openai":
+      return DEFAULT_OPENAI_MODEL;
+    case "aws-bedrock":
+      return DEFAULT_AWS_BEDROCK_MODEL;
+    case "template":
+    case "github-models":
+      return DEFAULT_LLM_MODEL;
+  }
 }
 
 export function parseLlmStyle(value: string): LlmStyle {
@@ -32,7 +56,9 @@ export function parseLlmStyle(value: string): LlmStyle {
     return value as LlmStyle;
   }
 
-  throw new Error(`Unsupported llm-style "${value}". Supported values are concise and detailed.`);
+  throw new Error(
+    `Unsupported llm-style "${value}". Supported values are concise and detailed.`,
+  );
 }
 
 export function parseCommaSeparatedList(value: string): string[] {
@@ -55,7 +81,9 @@ export function assertValidDateString(value: string): void {
     date.getUTCMonth() !== month - 1 ||
     date.getUTCDate() !== day
   ) {
-    throw new Error(`Invalid report-date "${value}". Use a real calendar date.`);
+    throw new Error(
+      `Invalid report-date "${value}". Use a real calendar date.`,
+    );
   }
 }
 
@@ -63,11 +91,17 @@ export function assertValidTimeZone(value: string): void {
   try {
     new Intl.DateTimeFormat("en-US", { timeZone: value }).format(new Date());
   } catch {
-    throw new Error(`Invalid report-timezone "${value}". Use an IANA timezone such as Asia/Tokyo.`);
+    throw new Error(
+      `Invalid report-timezone "${value}". Use an IANA timezone such as Asia/Tokyo.`,
+    );
   }
 }
 
-export function resolveReportDate(input: string, timeZone: string, now = new Date()): string {
+export function resolveReportDate(
+  input: string,
+  timeZone: string,
+  now = new Date(),
+): string {
   assertValidTimeZone(timeZone);
 
   if (input.trim() !== "") {
@@ -83,7 +117,7 @@ export function formatDateInTimeZone(date: Date, timeZone: string): string {
     timeZone,
     year: "numeric",
     month: "2-digit",
-    day: "2-digit"
+    day: "2-digit",
   }).formatToParts(date);
 
   const year = getDatePart(parts, "year");
@@ -93,7 +127,11 @@ export function formatDateInTimeZone(date: Date, timeZone: string): string {
   return `${year}-${month}-${day}`;
 }
 
-export function isOnReportDate(isoDate: string | undefined, reportDate: string, timeZone: string): boolean {
+export function isOnReportDate(
+  isoDate: string | undefined,
+  reportDate: string,
+  timeZone: string,
+): boolean {
   if (!isoDate) {
     return false;
   }
@@ -106,7 +144,10 @@ export function isOnReportDate(isoDate: string | undefined, reportDate: string, 
   return formatDateInTimeZone(parsed, timeZone) === reportDate;
 }
 
-export function getReportDateRange(reportDate: string, timeZone: string): { since: Date; until: Date } {
+export function getReportDateRange(
+  reportDate: string,
+  timeZone: string,
+): { since: Date; until: Date } {
   assertValidDateString(reportDate);
   assertValidTimeZone(timeZone);
 
@@ -115,7 +156,10 @@ export function getReportDateRange(reportDate: string, timeZone: string): { sinc
   return { since: start, until };
 }
 
-function getDatePart(parts: Intl.DateTimeFormatPart[], type: Intl.DateTimeFormatPartTypes): string {
+function getDatePart(
+  parts: Intl.DateTimeFormatPart[],
+  type: Intl.DateTimeFormatPartTypes,
+): string {
   const part = parts.find((item) => item.type === type)?.value;
   if (!part) {
     throw new Error(`Could not format date part "${type}".`);
@@ -166,7 +210,7 @@ function getTimeZoneOffsetMs(timeZone: string, date: Date): number {
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
-    hourCycle: "h23"
+    hourCycle: "h23",
   }).formatToParts(date);
 
   const year = Number(getDatePart(parts, "year"));

@@ -21,7 +21,6 @@ permissions:
   contents: write
   issues: read
   pull-requests: read
-  models: read
 
 jobs:
   report:
@@ -78,8 +77,7 @@ report:
   # pdfDir: .gitppou/pdf
 
 llm:
-  provider: github-models
-  model: openai/gpt-4o-mini
+  provider: template
 
 slack:
   notify: true
@@ -150,6 +148,17 @@ permissions:
   models: read
 ```
 
+For AWS Bedrock with GitHub OIDC, add `id-token: write`. The assumed IAM role also needs `bedrock:InvokeModel` for the configured model or inference profile:
+
+```yaml
+permissions:
+  actions: read
+  contents: read
+  issues: read
+  pull-requests: read
+  id-token: write
+```
+
 For committing reports:
 
 ```yaml
@@ -210,7 +219,10 @@ Secrets must be passed via `env`, not `with`.
 | ------------------------------------ | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
 | Default GitHub token env var         | Yes                              | Environment variable named by `github.tokenEnv`; `GITHUB_TOKEN` by default. Used for activity collection fallback and GitHub Models. |
 | Owner-specific GitHub token env vars | Only for mapped owners           | Additional tokens referenced by `github.tokens`.                                                                                     |
-| `BACKLOG_API_KEY`                    | Yes                              | Backlog API key.                                                                                                                     |
+| `OPENAI_API_KEY`                     | With `llm.provider: openai`      | OpenAI Platform API key. The variable name can be changed with `llm.apiKeyEnv`.                                                      |
+| AWS standard credentials             | With `llm.provider: aws-bedrock` | AWS SDK credential chain, such as a local profile or credentials exported by GitHub OIDC role assumption.                            |
+| `AWS_REGION` / `AWS_DEFAULT_REGION`  | Optional for AWS Bedrock         | AWS region when `llm.region` is omitted. Defaults to `ap-northeast-1`.                                                               |
+| `BACKLOG_API_KEY`                    | With Backlog                     | Backlog API key.                                                                                                                     |
 | `SLACK_WEBHOOK_URL`                  | Only for Slack                   | Slack Incoming Webhook URL.                                                                                                          |
 | `GITPPOU_CHROME_PATH`                | Only for custom PDF environments | Chrome or Chromium executable path for PDF output when auto-detection is not enough.                                                 |
 
@@ -311,7 +323,72 @@ When `llm.provider` is set to `github-models`, Gitppou sends normalized GitHub a
 
 GitHub Models can be used with a free, rate-limited quota available to GitHub accounts. For production or higher-volume use, users may need to enable paid GitHub Models usage. GitHub Models billing is separate from GitHub Copilot billing.
 
-If GitHub Models fails, Gitppou logs a warning and falls back to the template report.
+If GitHub Models fails, Gitppou fails the run. To generate a report without an external LLM, explicitly set `llm.provider: template`.
+
+## OpenAI Mode
+
+OpenAI mode calls the OpenAI Responses API directly:
+
+```yaml
+llm:
+  provider: openai
+  model: gpt-5-nano
+  # apiKeyEnv: OPENAI_API_KEY
+```
+
+Pass the Platform API key through the configured environment variable:
+
+```yaml
+env:
+  OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+```
+
+When `model` is omitted, OpenAI mode defaults to `gpt-5-nano`. API responses are requested with storage disabled, and the original GPT-5, GPT-5 mini, and GPT-5 nano families use minimal reasoning for this summarization workload. ChatGPT workspace credits and OpenAI Platform API billing are separate.
+
+## AWS Bedrock Mode
+
+AWS Bedrock mode uses the Bedrock Converse API and the AWS SDK credential chain:
+
+```yaml
+llm:
+  provider: aws-bedrock
+  model: jp.amazon.nova-2-lite-v1:0
+  region: ap-northeast-1
+  # Local preview only. Omit in GitHub Actions when using OIDC.
+  profile: your-profile
+```
+
+Local preview can use `llm.profile`, which overrides `AWS_PROFILE` for the Bedrock client:
+
+```sh
+pnpm preview -- --date 2026-07-10 --print
+```
+
+For GitHub Actions, prefer OIDC and short-lived credentials:
+
+```yaml
+permissions:
+  id-token: write
+  contents: read
+
+steps:
+  - uses: actions/checkout@v6
+
+  - uses: aws-actions/configure-aws-credentials@v6
+    with:
+      role-to-assume: ${{ secrets.AWS_BEDROCK_ROLE_ARN }}
+      aws-region: ap-northeast-1
+
+  - uses: your-org/gitppou@v1
+    with:
+      config: gitppou.yml
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+```
+
+The IAM role needs `bedrock:InvokeModel` access to the configured model or inference profile. When `model` is omitted, AWS Bedrock mode defaults to `jp.amazon.nova-2-lite-v1:0`; `region` defaults to the AWS region environment and then `ap-northeast-1`. Omit `llm.profile` in GitHub Actions so the SDK uses the short-lived credentials exported by the OIDC setup step.
+
+All external LLM providers refine the same fact-based template draft. In each issue summary, Gitppou asks the model to interpret and paraphrase commit messages, PR titles, and comments instead of quoting their original wording. The detailed activity list remains available below the summary. If an external LLM report or Slack-summary call fails, Gitppou fails the run instead of silently using a template or local summary.
 
 ## Report Languages
 
@@ -362,7 +439,7 @@ env:
   SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
 ```
 
-Slack receives a short prose summary, not the full raw activity. With `llm.provider: github-models`, the Slack summary is generated from the final report; otherwise Gitppou falls back to a local heading-based summary. When running in GitHub Actions, the summary includes the actor, workflow, repository/ref, and a list of links to every generated report file in the repository. If Backlog document publishing is enabled, Slack also includes the created Backlog document link. Slack failures are warnings in v1 and do not fail the action.
+Slack receives a short prose summary, not the full raw activity. With any external LLM provider (`github-models`, `openai`, or `aws-bedrock`), the Slack summary is generated from the final report; template mode uses a local heading-based summary. When running in GitHub Actions, the summary includes the actor, workflow, repository/ref, and a list of links to every generated report file in the repository. If Backlog document publishing is enabled, Slack also includes the created Backlog document link. Slack failures are warnings in v1 and do not fail the action.
 
 ## HTML and PDF Reports
 
@@ -412,7 +489,7 @@ Do not hard-code secrets, and do not print secrets to logs. Use GitHub Actions S
 
 Reports may contain internal issue names, customer names, internal URLs, incident details, personal names, or private comments. Treat generated reports as internal engineering records.
 
-When using GitHub Models, normalized GitHub and Backlog activity data is sent to GitHub Models. The default template provider does not send activity data to an external LLM.
+When using `github-models`, `openai`, or `aws-bedrock`, normalized GitHub and Backlog activity data is sent to the selected provider. The default template provider does not send activity data to an external LLM.
 
 ## Examples
 
@@ -421,6 +498,8 @@ See:
 - [`examples/daily-report.yml`](examples/daily-report.yml)
 - [`examples/daily-report-with-commit.yml`](examples/daily-report-with-commit.yml)
 - [`examples/daily-report-template-mode.yml`](examples/daily-report-template-mode.yml)
+- [`examples/daily-report-openai.yml`](examples/daily-report-openai.yml)
+- [`examples/daily-report-aws-bedrock.yml`](examples/daily-report-aws-bedrock.yml)
 
 ## Troubleshooting
 
@@ -468,7 +547,15 @@ Check `backlog.userId`. It must be the numeric Backlog user id for the space, no
 
 `GitHub Models request failed`
 
-Check `permissions.models: read`, the selected `llm.model`, and whether GitHub Models is enabled for the account or organization. Gitppou will still generate the template report.
+Check `permissions.models: read`, the selected `llm.model`, and whether GitHub Models is enabled for the account or organization. The run fails until the provider is available or `llm.provider` is changed to `template`.
+
+`OpenAI request failed`
+
+Check `OPENAI_API_KEY` (or `llm.apiKeyEnv`), the selected `llm.model`, and the OpenAI Platform project's billing and model access. The run fails until the provider is available or `llm.provider` is changed to `template`.
+
+`AWS Bedrock ...`
+
+Check the AWS identity, `llm.region`, inference profile ID, model access, and the role's `bedrock:InvokeModel` permission. For GitHub Actions OIDC, also check `permissions.id-token: write` and the role trust policy. The run fails until the provider is available or `llm.provider` is changed to `template`.
 
 `Slack webhook request failed`
 

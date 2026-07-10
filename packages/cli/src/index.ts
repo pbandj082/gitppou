@@ -62,6 +62,9 @@ function parseCliArgs(args: string[]): CliOptions {
       "report-dir": { type: "string" },
       "llm-provider": { type: "string" },
       "llm-model": { type: "string" },
+      "llm-api-key-env": { type: "string" },
+      "llm-region": { type: "string" },
+      "llm-profile": { type: "string" },
       "llm-max-input-chars": { type: "string" },
       "llm-style": { type: "string" },
       slack: { type: "boolean" },
@@ -139,6 +142,21 @@ function parseCliArgs(args: string[]): CliOptions {
     options,
     "llmModel",
     readStringOption(values, "llm-model", "--llm-model"),
+  );
+  assignStringOption(
+    options,
+    "llmApiKeyEnv",
+    readStringOption(values, "llm-api-key-env", "--llm-api-key-env"),
+  );
+  assignStringOption(
+    options,
+    "llmRegion",
+    readStringOption(values, "llm-region", "--llm-region"),
+  );
+  assignStringOption(
+    options,
+    "llmProfile",
+    readStringOption(values, "llm-profile", "--llm-profile"),
   );
   assignStringOption(
     options,
@@ -263,8 +281,11 @@ Options:
       --timezone <tz>         Report timezone override
       --language <en|ja>      Report language override
       --report-dir <path>     Directory where the Markdown report is written
-      --llm-provider <name>   template or github-models
-      --llm-model <model>     GitHub Models model ID
+      --llm-provider <name>   template, github-models, openai, or aws-bedrock
+      --llm-model <model>     Provider model ID
+      --llm-api-key-env <env> OpenAI API key env var. Defaults to OPENAI_API_KEY
+      --llm-region <region>   AWS Bedrock region. Defaults to AWS env or ap-northeast-1
+      --llm-profile <profile> Local AWS shared-config profile for Bedrock
       --llm-style <style>     concise or detailed
       --slack                 Send Slack notification. Skipped by default for preview
       --print                 Print generated Markdown after writing it
@@ -274,6 +295,8 @@ Options:
 Environment:
   GITHUB_TOKEN                Required by default; configurable with github.tokenEnv
   GITPPOU_TOKEN_*             Optional owner-specific tokens referenced by github.tokens
+  OPENAI_API_KEY              Required when llm.provider is openai
+  AWS_REGION                  Used when llm.provider is aws-bedrock; standard AWS credentials also apply
   BACKLOG_API_KEY             Required
   SLACK_WEBHOOK_URL           Required only with --slack`;
 }

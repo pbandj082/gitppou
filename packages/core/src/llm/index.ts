@@ -1,2 +1,7 @@
 export { applyTemplateProvider, generateTemplateReport } from "./template.js";
-export { refineWithGitHubModels, summarizeSlackWithGitHubModels } from "./github-models.js";
+export {
+  refineWithGitHubModels,
+  refineWithLlm,
+  summarizeSlackWithGitHubModels,
+  summarizeSlackWithLlm,
+} from "./github-models.js";

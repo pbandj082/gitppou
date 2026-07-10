@@ -1,5 +1,5 @@
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { resolveReportDate } from "../config.js";
 import { renderReportHtml } from "../html.js";
 import { generateTemplateReport } from "../llm/template.js";
@@ -37,7 +37,76 @@ const baseConfig: GitppouConfig = {
   llmStyle: "concise",
 };
 
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
+
 describe("report helpers", () => {
+  it("fails when the configured report LLM call fails", async () => {
+    await mkdir(".gitppou/test-reports", { recursive: true });
+    const reportDir = await mkdtemp(".gitppou/test-reports/llm-failure-");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("", { status: 403 })),
+    );
+
+    try {
+      await expect(
+        generateDailyReport({
+          ...baseConfig,
+          backlogSpaces: [],
+          githubRepos: [],
+          llmProvider: "github-models",
+          reportDir,
+        }),
+      ).rejects.toThrow("GitHub Models request failed with status 403.");
+    } finally {
+      await rm(reportDir, { recursive: true, force: true });
+    }
+  });
+
+  it("fails when the configured Slack-summary LLM call fails", async () => {
+    await mkdir(".gitppou/test-reports", { recursive: true });
+    const reportDir = await mkdtemp(".gitppou/test-reports/llm-slack-failure-");
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                finish_reason: "stop",
+                message: { content: "# Daily Report\n\nGenerated report" },
+              },
+            ],
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
+      )
+      .mockResolvedValueOnce(new Response("", { status: 403 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    try {
+      await expect(
+        generateDailyReport({
+          ...baseConfig,
+          backlogSpaces: [],
+          githubRepos: [],
+          llmProvider: "github-models",
+          reportDir,
+          slackNotify: true,
+        }),
+      ).rejects.toThrow("GitHub Models request failed with status 403.");
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    } finally {
+      await rm(reportDir, { recursive: true, force: true });
+    }
+  });
+
   it("builds the monthly report path", () => {
     expect(buildReportPath("reports", "2026-07-03")).toBe(
       "reports/2026-07/2026-07-03.md",
