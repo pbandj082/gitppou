@@ -22,7 +22,7 @@ Work:
 Fixed the login validation flow and prepared the next review items. The detailed activity list is available in the linked report.
 ```
 
-The Slack notification does not include the full Raw Activity section or a task list. When `llm.provider` is `github-models`, Gitppou asks GitHub Models to summarize the final report for Slack. If GitHub Models is unavailable, Gitppou falls back to a short local summary built from the report headings.
+The Slack notification does not include the full Raw Activity section or a task list. When `llm.provider` is `openai` or `aws-bedrock`, Gitppou asks the selected provider to summarize the final report for Slack. Template mode uses a short local summary built from the report headings.
 
 When Gitppou runs in GitHub Actions, the Slack summary includes GitHub Actions context from environment variables such as `GITHUB_ACTOR`, `GITHUB_WORKFLOW`, `GITHUB_REPOSITORY`, `GITHUB_REF_NAME`, and `GITHUB_RUN_NUMBER`. The details URL points to the generated report file in the repository. If `git.commitReport` is true, the link becomes valid after the action commits the report. When Backlog document publishing is enabled, Gitppou adds the created Backlog document link after the report file links.
 
