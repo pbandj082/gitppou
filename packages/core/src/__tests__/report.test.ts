@@ -1,5 +1,5 @@
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { resolveReportDate } from "../config.js";
 import { renderReportHtml } from "../html.js";
 import { generateTemplateReport } from "../llm/template.js";
@@ -37,7 +37,76 @@ const baseConfig: GitppouConfig = {
   llmStyle: "concise",
 };
 
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
+
 describe("report helpers", () => {
+  it("fails when the configured report LLM call fails", async () => {
+    await mkdir(".gitppou/test-reports", { recursive: true });
+    const reportDir = await mkdtemp(".gitppou/test-reports/llm-failure-");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("", { status: 403 })),
+    );
+
+    try {
+      await expect(
+        generateDailyReport({
+          ...baseConfig,
+          backlogSpaces: [],
+          githubRepos: [],
+          llmProvider: "github-models",
+          reportDir,
+        }),
+      ).rejects.toThrow("GitHub Models request failed with status 403.");
+    } finally {
+      await rm(reportDir, { recursive: true, force: true });
+    }
+  });
+
+  it("fails when the configured Slack-summary LLM call fails", async () => {
+    await mkdir(".gitppou/test-reports", { recursive: true });
+    const reportDir = await mkdtemp(".gitppou/test-reports/llm-slack-failure-");
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                finish_reason: "stop",
+                message: { content: "# Daily Report\n\nGenerated report" },
+              },
+            ],
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
+      )
+      .mockResolvedValueOnce(new Response("", { status: 403 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    try {
+      await expect(
+        generateDailyReport({
+          ...baseConfig,
+          backlogSpaces: [],
+          githubRepos: [],
+          llmProvider: "github-models",
+          reportDir,
+          slackNotify: true,
+        }),
+      ).rejects.toThrow("GitHub Models request failed with status 403.");
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    } finally {
+      await rm(reportDir, { recursive: true, force: true });
+    }
+  });
+
   it("builds the monthly report path", () => {
     expect(buildReportPath("reports", "2026-07-03")).toBe(
       "reports/2026-07/2026-07-03.md",
@@ -698,5 +767,61 @@ describe("report helpers", () => {
     );
     expect(markdown).not.toContain("- APP-2: ステータス:");
     expect(markdown).not.toContain("- APP-1: ステータス:");
+  });
+
+  it("limits Mermaid gantt tasks to two weeks before and after the report date", () => {
+    const activities: NormalizedActivity[] = [
+      {
+        source: "backlog",
+        kind: "assigned_issue",
+        issueKey: "APP-1",
+        title: "APP-1 Ongoing issue",
+        metadata: {
+          startDate: "2026-05-01",
+          dueDate: "2026-07-01"
+        }
+      },
+      {
+        source: "backlog",
+        kind: "assigned_issue",
+        issueKey: "APP-2",
+        title: "APP-2 Long-running issue",
+        metadata: {
+          startDate: "2026-07-05",
+          dueDate: "2026-08-31"
+        }
+      },
+      {
+        source: "backlog",
+        kind: "assigned_issue",
+        issueKey: "APP-3",
+        title: "APP-3 Past issue",
+        metadata: {
+          startDate: "2026-05-01",
+          dueDate: "2026-06-21"
+        }
+      },
+      {
+        source: "backlog",
+        kind: "assigned_issue",
+        issueKey: "APP-4",
+        title: "APP-4 Future issue",
+        metadata: {
+          startDate: "2026-07-21",
+          dueDate: "2026-08-01"
+        }
+      }
+    ];
+    const markdown = generateTemplateReport({
+      config: baseConfig,
+      activities,
+      groups: []
+    });
+    const gantt = markdown.match(/```mermaid\n[\s\S]*?\n```/)?.[0] ?? "";
+
+    expect(gantt).toContain("APP-1 Ongoing issue :task_APP_1, 2026-06-22, 2026-07-01");
+    expect(gantt).toContain("APP-2 Long-running issue :task_APP_2, 2026-07-05, 2026-07-20");
+    expect(gantt).not.toContain("APP-3 Past issue");
+    expect(gantt).not.toContain("APP-4 Future issue");
   });
 });

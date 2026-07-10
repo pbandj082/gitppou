@@ -19,14 +19,18 @@ export type {
 } from "./types.js";
 
 export {
+  DEFAULT_AWS_BEDROCK_MODEL,
+  DEFAULT_AWS_REGION,
   DEFAULT_LLM_MAX_INPUT_CHARS,
   DEFAULT_LLM_MODEL,
   DEFAULT_LLM_PROVIDER,
   DEFAULT_LLM_STYLE,
+  DEFAULT_OPENAI_MODEL,
   DEFAULT_REPORT_LANGUAGE,
   DEFAULT_REPORT_TIMEZONE,
   assertValidDateString,
   assertValidTimeZone,
+  defaultLlmModel,
   formatDateInTimeZone,
   getReportDateRange,
   isOnReportDate,

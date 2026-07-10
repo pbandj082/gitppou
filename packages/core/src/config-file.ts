@@ -1,10 +1,11 @@
 import {
+  DEFAULT_AWS_REGION,
   DEFAULT_LLM_MAX_INPUT_CHARS,
-  DEFAULT_LLM_MODEL,
   DEFAULT_LLM_PROVIDER,
   DEFAULT_LLM_STYLE,
   DEFAULT_REPORT_LANGUAGE,
   DEFAULT_REPORT_TIMEZONE,
+  defaultLlmModel,
   parseLlmProvider,
   parseLlmStyle,
   parseReportLanguage,
@@ -33,6 +34,9 @@ export type ConfigBuildOptions = {
   reportDir?: string;
   llmProvider?: string;
   llmModel?: string;
+  llmApiKeyEnv?: string;
+  llmRegion?: string;
+  llmProfile?: string;
   llmMaxInputChars?: string;
   llmStyle?: string;
   commitReport?: boolean;
@@ -77,6 +81,11 @@ export function buildGitppouConfig(
       String(DEFAULT_LLM_MAX_INPUT_CHARS),
     "llm-max-input-chars",
   );
+  const llmProvider = parseLlmProvider(
+    options.llmProvider ??
+      getString(llm, "provider", "config.llm.provider") ??
+      DEFAULT_LLM_PROVIDER,
+  );
   const slackNotify =
     options.slackNotify ??
     getOptionalBoolean(slack, "notify", "config.slack.notify") ??
@@ -120,15 +129,11 @@ export function buildGitppouConfig(
       getOptionalBoolean(git, "commitReport", "config.git.commitReport") ??
       false,
     slackNotify,
-    llmProvider: parseLlmProvider(
-      options.llmProvider ??
-        getString(llm, "provider", "config.llm.provider") ??
-        DEFAULT_LLM_PROVIDER,
-    ),
+    llmProvider,
     llmModel:
       options.llmModel ??
       getString(llm, "model", "config.llm.model") ??
-      DEFAULT_LLM_MODEL,
+      defaultLlmModel(llmProvider),
     llmMaxInputChars,
     llmStyle: parseLlmStyle(
       options.llmStyle ??
@@ -136,6 +141,28 @@ export function buildGitppouConfig(
         DEFAULT_LLM_STYLE,
     ),
   };
+
+  if (config.llmProvider === "openai") {
+    const apiKeyEnv =
+      options.llmApiKeyEnv ??
+      getString(llm, "apiKeyEnv", "config.llm.apiKeyEnv") ??
+      "OPENAI_API_KEY";
+    config.llmApiKey = requiredEnv(env, apiKeyEnv);
+  }
+
+  if (config.llmProvider === "aws-bedrock") {
+    config.llmRegion =
+      options.llmRegion ??
+      getString(llm, "region", "config.llm.region") ??
+      env.AWS_REGION?.trim() ??
+      env.AWS_DEFAULT_REGION?.trim() ??
+      DEFAULT_AWS_REGION;
+    const profile =
+      options.llmProfile ?? getString(llm, "profile", "config.llm.profile");
+    if (profile) {
+      config.llmProfile = profile;
+    }
+  }
 
   if (Object.keys(githubTokensByOwner).length > 0) {
     config.githubTokensByOwner = githubTokensByOwner;

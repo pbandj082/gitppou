@@ -54,7 +54,18 @@ report:
 
 llm:
   provider: template
-  model: openai/gpt-4o-mini
+  # OpenAI:
+  # provider: openai
+  # model: gpt-5-nano
+  # apiKeyEnv: OPENAI_API_KEY
+  # AWS Bedrock:
+  # provider: aws-bedrock
+  # model: jp.amazon.nova-2-lite-v1:0
+  # region: ap-northeast-1
+  # profile: your-local-profile
+  # GitHub Models:
+  # provider: github-models
+  # model: openai/gpt-4o-mini
   maxInputChars: 20000
   style: concise
 

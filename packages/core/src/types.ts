@@ -1,5 +1,6 @@
 export type ReportLanguage = "en" | "ja";
-export type LlmProviderName = "template" | "github-models";
+export type LlmProviderName =
+  "template" | "github-models" | "openai" | "aws-bedrock";
 export type LlmStyle = "concise" | "detailed";
 export type GitHubRepoSort = "created" | "updated" | "pushed" | "full_name";
 export type ReportFormat = "markdown" | "html" | "pdf";
@@ -74,6 +75,9 @@ export type GitppouConfig = {
 
   llmProvider: LlmProviderName;
   llmModel: string;
+  llmApiKey?: string;
+  llmRegion?: string;
+  llmProfile?: string;
   llmMaxInputChars: number;
   llmStyle: LlmStyle;
 };

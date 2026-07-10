@@ -20,6 +20,7 @@
     "lint": "biome lint src"
   },
   "dependencies": {
+    "@aws-sdk/client-bedrock-runtime": "^3.1084.0",
     "@octokit/rest": "^22.0.0",
     "marked": "^18.0.5"
   },

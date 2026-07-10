@@ -64,6 +64,64 @@ describe("buildPreviewConfig", () => {
     expect(config.slackWebhookUrl).toBeUndefined();
   });
 
+  it("configures OpenAI with its provider default model and API key", () => {
+    const config = buildPreviewConfig(
+      {
+        github: {
+          username: "octocat",
+        },
+        backlog: {
+          enabled: false,
+        },
+        llm: {
+          provider: "openai",
+          apiKeyEnv: "CUSTOM_OPENAI_API_KEY",
+        },
+      },
+      {},
+      {
+        GITHUB_TOKEN: "github-token",
+        CUSTOM_OPENAI_API_KEY: "openai-key",
+      },
+    );
+
+    expect(config).toMatchObject({
+      llmProvider: "openai",
+      llmModel: "gpt-5-nano",
+      llmApiKey: "openai-key",
+    });
+  });
+
+  it("configures AWS Bedrock with its provider default model and AWS region", () => {
+    const config = buildPreviewConfig(
+      {
+        github: {
+          username: "octocat",
+        },
+        backlog: {
+          enabled: false,
+        },
+        llm: {
+          provider: "aws-bedrock",
+          profile: "gaia",
+        },
+      },
+      {},
+      {
+        GITHUB_TOKEN: "github-token",
+        AWS_REGION: "ap-northeast-1",
+      },
+    );
+
+    expect(config).toMatchObject({
+      llmProvider: "aws-bedrock",
+      llmModel: "jp.amazon.nova-2-lite-v1:0",
+      llmRegion: "ap-northeast-1",
+      llmProfile: "gaia",
+    });
+    expect(config.llmApiKey).toBeUndefined();
+  });
+
   it("builds multiple Backlog spaces from config objects", () => {
     const config = buildPreviewConfig(
       {

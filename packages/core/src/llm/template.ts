@@ -25,6 +25,13 @@ type ActivityDescriptionContext = {
   groupTitle?: string;
 };
 
+type ProgressDateRange = {
+  start: string;
+  due: string;
+};
+
+const MERMAID_GANTT_WINDOW_DAYS = 14;
+
 const LABELS: Record<GitppouConfig["reportLanguage"], Labels> = {
   en: {
     title: "Daily Report",
@@ -750,7 +757,11 @@ function progressLines(
   groups: ActivityGroup[],
   config: GitppouConfig
 ): string[] {
-  const assignedIssues = assignedProgressActivities(activities, config.reportDate);
+  const assignedIssues = assignedProgressActivities(
+    activities,
+    config.reportDate,
+    mermaidGanttDateRange(config.reportDate)
+  );
   if (assignedIssues.length > 0) {
     return assignedProgressLines(assignedIssues, config);
   }
@@ -776,10 +787,18 @@ function progressLines(
   });
 }
 
-function assignedProgressActivities(activities: NormalizedActivity[], reportDate?: string): NormalizedActivity[] {
+function assignedProgressActivities(
+  activities: NormalizedActivity[],
+  reportDate?: string,
+  dateRange?: ProgressDateRange
+): NormalizedActivity[] {
   return activities
     .filter((activity) => activity.kind === "assigned_issue")
     .filter((activity) => progressSchedule(activity, reportDate) !== undefined)
+    .filter((activity) => {
+      const range = progressDateRange(activity, reportDate);
+      return !dateRange || Boolean(range && progressDateRangesOverlap(range, dateRange));
+    })
     .sort((left, right) => compareProgressStartDate(left, right, reportDate))
     .slice(0, 10);
 }
@@ -841,7 +860,7 @@ function mermaidTaskLine(activity: NormalizedActivity, reportDate: string): stri
   const marker = mermaidStatusMarker(metadataString(activity, "status"));
   const taskId = `task_${issueKey.replace(/[^A-Za-z0-9_]/g, "_")}`;
   const markerPrefix = marker ? `${marker}, ${taskId}` : taskId;
-  const schedule = progressSchedule(activity, reportDate) ?? `${reportDate}, 1d`;
+  const schedule = mermaidProgressSchedule(activity, reportDate) ?? `${reportDate}, 1d`;
 
   return `${title} :${markerPrefix}, ${schedule}`;
 }
@@ -887,7 +906,7 @@ function progressSchedule(activity: NormalizedActivity, reportDate?: string): st
 function progressDateRange(
   activity: NormalizedActivity,
   reportDate?: string
-): { start: string; due: string } | undefined {
+): ProgressDateRange | undefined {
   const startDate = metadataDate(activity, "startDate");
   const dueDate = metadataDate(activity, "dueDate");
   if (!startDate && !dueDate) {
@@ -901,6 +920,49 @@ function progressDateRange(
   }
 
   return { start, due };
+}
+
+function mermaidGanttDateRange(reportDate: string): ProgressDateRange {
+  return {
+    start: addDays(reportDate, -MERMAID_GANTT_WINDOW_DAYS),
+    due: addDays(reportDate, MERMAID_GANTT_WINDOW_DAYS)
+  };
+}
+
+function mermaidProgressSchedule(activity: NormalizedActivity, reportDate: string): string | undefined {
+  const range = progressDateRange(activity, reportDate);
+  if (!range) {
+    return undefined;
+  }
+
+  const visibleRange = clipProgressDateRange(range, mermaidGanttDateRange(reportDate));
+  if (!visibleRange) {
+    return undefined;
+  }
+
+  return progressScheduleForRange(visibleRange);
+}
+
+function clipProgressDateRange(
+  range: ProgressDateRange,
+  bounds: ProgressDateRange
+): ProgressDateRange | undefined {
+  if (!progressDateRangesOverlap(range, bounds)) {
+    return undefined;
+  }
+
+  return {
+    start: range.start < bounds.start ? bounds.start : range.start,
+    due: range.due > bounds.due ? bounds.due : range.due
+  };
+}
+
+function progressDateRangesOverlap(left: ProgressDateRange, right: ProgressDateRange): boolean {
+  return left.start <= right.due && right.start <= left.due;
+}
+
+function progressScheduleForRange(range: ProgressDateRange): string {
+  return range.start === range.due ? `${range.start}, 1d` : `${range.start}, ${range.due}`;
 }
 
 function progressStartDate(activity: NormalizedActivity, reportDate?: string): string {

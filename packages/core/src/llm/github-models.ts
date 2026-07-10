@@ -1,14 +1,10 @@
 import { buildReportEvidence } from "../report-evidence.js";
-import type { ActivityGroup, GitppouConfig, NormalizedActivity } from "../types.js";
-
-type GitHubModelsResponse = {
-  choices?: Array<{
-    finish_reason?: string | null;
-    message?: {
-      content?: string;
-    };
-  }>;
-};
+import type {
+  ActivityGroup,
+  GitppouConfig,
+  NormalizedActivity,
+} from "../types.js";
+import { chatWithLlmProvider } from "./chat.js";
 
 type RefineInput = {
   config: GitppouConfig;
@@ -22,99 +18,67 @@ type SlackSummaryInput = {
   reportMarkdown: string;
 };
 
-const GITHUB_MODELS_ENDPOINT = "https://models.github.ai/inference/chat/completions";
-const GITHUB_API_VERSION = "2026-03-10";
-
-export async function refineWithGitHubModels({
+export async function refineWithLlm({
   config,
   templateDraft,
   activities,
-  groups
+  groups,
 }: RefineInput): Promise<string> {
   const inputBudgets = splitPromptInputBudget(config.llmMaxInputChars);
-  const evidenceJson = buildPromptEvidence(activities, groups, inputBudgets.evidenceJson);
+  const evidenceJson = buildPromptEvidence(
+    activities,
+    groups,
+    inputBudgets.evidenceJson,
+  );
   const prompt = buildPrompt({
     date: config.reportDate,
     language: config.reportLanguage,
-    templateDraft: truncate(stripRawActivitySection(templateDraft), inputBudgets.templateDraft),
-    evidenceJson
+    templateDraft: truncate(
+      stripRawActivitySection(templateDraft),
+      inputBudgets.templateDraft,
+    ),
+    evidenceJson,
   });
 
-  const markdown = await chatWithGitHubModels({
+  const markdown = await chatWithLlmProvider({
     config,
     prompt,
     maxTokens: config.llmStyle === "detailed" ? 6000 : 4000,
-    temperature: config.llmStyle === "detailed" ? 0.2 : 0.1
+    temperature: config.llmStyle === "detailed" ? 0.2 : 0.1,
   });
   assertRequiredIssueGroupsRendered(markdown, groups);
 
   return markdown;
 }
 
-export async function summarizeSlackWithGitHubModels({
+export async function summarizeSlackWithLlm({
   config,
-  reportMarkdown
+  reportMarkdown,
 }: SlackSummaryInput): Promise<string> {
   const prompt = buildSlackSummaryPrompt({
     date: config.reportDate,
     language: config.reportLanguage,
-    reportMarkdown: truncate(reportMarkdown, Math.min(config.llmMaxInputChars, 12000))
+    reportMarkdown: truncate(
+      reportMarkdown,
+      Math.min(config.llmMaxInputChars, 12000),
+    ),
   });
 
-  return chatWithGitHubModels({
+  return chatWithLlmProvider({
     config,
     prompt,
-    maxTokens: config.reportLanguage === "ja" ? 240 : 180,
-    temperature: 0.1
+    maxTokens:
+      config.llmProvider === "openai"
+        ? 1000
+        : config.reportLanguage === "ja"
+          ? 240
+          : 180,
+    temperature: 0.1,
   });
 }
 
-async function chatWithGitHubModels(input: {
-  config: GitppouConfig;
-  prompt: string;
-  maxTokens: number;
-  temperature: number;
-}): Promise<string> {
-  const response = await fetch(GITHUB_MODELS_ENDPOINT, {
-    method: "POST",
-    headers: {
-      Accept: "application/vnd.github+json",
-      Authorization: `Bearer ${input.config.githubToken}`,
-      "Content-Type": "application/json",
-      "X-GitHub-Api-Version": GITHUB_API_VERSION
-    },
-    body: JSON.stringify({
-      model: input.config.llmModel,
-      messages: [
-        {
-          role: "user",
-          content: input.prompt
-        }
-      ],
-      temperature: input.temperature,
-      max_tokens: input.maxTokens
-    })
-  });
-
-  if (!response.ok) {
-    throw new Error(`GitHub Models request failed with status ${response.status}.`);
-  }
-
-  const data = (await response.json()) as GitHubModelsResponse;
-  const choice = data.choices?.[0];
-  const finishReason = choice?.finish_reason;
-  const content = choice?.message?.content?.trim();
-
-  if (!content) {
-    throw new Error("GitHub Models returned an empty response.");
-  }
-
-  if (finishReason && finishReason !== "stop") {
-    throw new Error(`GitHub Models response was incomplete. finish_reason=${finishReason}.`);
-  }
-
-  return content;
-}
+export const refineWithGitHubModels = refineWithLlm;
+export const summarizeSlackWithGitHubModels = summarizeSlackWithLlm;
 
 function buildPrompt(input: {
   date: string;
@@ -136,6 +100,8 @@ function buildPrompt(input: {
 - テンプレート日報のBacklog課題見出しにリンクが含まれる場合は、その見出しリンクを維持する
 - 各課題見出しの下では、メタ情報の後、アクティビティ箇条書きの前に1文の自然文要約を置く
 - 要約文はcommitメッセージ、PRタイトル、Backlogコメント本文、直前コメント文脈から「何について対応したか」を具体化し、activity種別だけの説明で終わらせない
+- 要約文ではcommitメッセージ、PRタイトル、コメント本文の内容を解釈して自然に言い換え、原文を「」で引用・列挙しない
+- 原文は後続のアクティビティ一覧で確認できるため、要約文では同じ文言を繰り返さず、対応内容と結果をまとめる
 - URLは必ずMarkdownリンク（例: [リンク](https://example.com)）として出力し、生URLのまま書かない
 - 「userActions」にある当日ユーザー本人の行動だけを「本日対応したこと」に書く
 - 「groupedUserActions」に含まれる各issueKeyは、必ず本日対応したことの項目として出力し、省略しない
@@ -180,6 +146,8 @@ Rules:
 - If template Backlog issue headings contain links, preserve those heading links.
 - Under each issue heading, keep a one-sentence natural-language summary after metadata and before activity bullets.
 - Make each summary concrete by using commit messages, PR titles, Backlog comment bodies, and previous-comment context; do not summarize only by activity type.
+- In each summary, interpret and paraphrase commit messages, PR titles, and comment bodies; do not quote or enumerate their original wording.
+- The original wording remains visible in the activity list, so summarize the work and outcome without repeating it in the summary.
 - Always render URLs as Markdown links such as [link](https://example.com); do not emit raw URLs.
 - Write "Work completed today" only from entries in "userActions".
 - Include every issueKey from "groupedUserActions" as an item under "Work completed today"; do not omit any grouped user-action issue.
@@ -255,9 +223,11 @@ ${input.reportMarkdown}`;
 
 function commentContextForGroup(
   activities: NormalizedActivity[],
-  groupActivities: NormalizedActivity[]
+  groupActivities: NormalizedActivity[],
 ): NormalizedActivity[] {
-  const issueKey = groupActivities.find((activity) => activity.issueKey)?.issueKey;
+  const issueKey = groupActivities.find(
+    (activity) => activity.issueKey,
+  )?.issueKey;
   if (!issueKey) {
     return [];
   }
@@ -265,8 +235,11 @@ function commentContextForGroup(
   const commentIds = new Set(
     groupActivities
       .map((activity) => activity.metadata?.backlogCommentId)
-      .filter((value): value is string | number => typeof value === "string" || typeof value === "number")
-      .map(String)
+      .filter(
+        (value): value is string | number =>
+          typeof value === "string" || typeof value === "number",
+      )
+      .map(String),
   );
 
   return activities.filter((activity) => {
@@ -275,7 +248,11 @@ function commentContextForGroup(
     }
 
     const contextForCommentId = activity.metadata?.contextForCommentId;
-    if (commentIds.size === 0 || (typeof contextForCommentId !== "string" && typeof contextForCommentId !== "number")) {
+    if (
+      commentIds.size === 0 ||
+      (typeof contextForCommentId !== "string" &&
+        typeof contextForCommentId !== "number")
+    ) {
       return true;
     }
 
@@ -291,28 +268,43 @@ function truncate(value: string, maxChars: number): string {
   return `${value.slice(0, maxChars)}\n...truncated to ${maxChars} characters`;
 }
 
-function assertRequiredIssueGroupsRendered(markdown: string, groups: ActivityGroup[]): void {
+function assertRequiredIssueGroupsRendered(
+  markdown: string,
+  groups: ActivityGroup[],
+): void {
   const missingIssueKeys = groups
     .map((group) => group.issueKey)
     .filter((issueKey) => issueKey !== "Unlinked")
     .filter((issueKey) => !markdown.includes(issueKey));
 
   if (missingIssueKeys.length > 0) {
-    throw new Error(`GitHub Models omitted required issue groups: ${missingIssueKeys.join(", ")}.`);
+    throw new Error(
+      `LLM omitted required issue groups: ${missingIssueKeys.join(", ")}.`,
+    );
   }
 }
 
-function splitPromptInputBudget(maxInputChars: number): { templateDraft: number; evidenceJson: number } {
+function splitPromptInputBudget(maxInputChars: number): {
+  templateDraft: number;
+  evidenceJson: number;
+} {
   const totalBudget = Math.max(2, Math.min(maxInputChars, 20_000));
-  const templateDraft = Math.max(1, Math.min(8_000, Math.floor(totalBudget * 0.35)));
+  const templateDraft = Math.max(
+    1,
+    Math.min(8_000, Math.floor(totalBudget * 0.35)),
+  );
 
   return {
     templateDraft,
-    evidenceJson: Math.max(1, totalBudget - templateDraft)
+    evidenceJson: Math.max(1, totalBudget - templateDraft),
   };
 }
 
-function buildPromptEvidence(activities: NormalizedActivity[], groups: ActivityGroup[], maxChars: number): string {
+function buildPromptEvidence(
+  activities: NormalizedActivity[],
+  groups: ActivityGroup[],
+  maxChars: number,
+): string {
   const reportEvidence = buildReportEvidence(activities);
   const attempts = [
     {
@@ -322,7 +314,7 @@ function buildPromptEvidence(activities: NormalizedActivity[], groups: ActivityG
       contextOnlyLimit: 20,
       includeUrls: true,
       includeMetadata: true,
-      includeCommentContext: true
+      includeCommentContext: true,
     },
     {
       actionBodyChars: 360,
@@ -331,7 +323,7 @@ function buildPromptEvidence(activities: NormalizedActivity[], groups: ActivityG
       contextOnlyLimit: 10,
       includeUrls: true,
       includeMetadata: true,
-      includeCommentContext: true
+      includeCommentContext: true,
     },
     {
       actionBodyChars: 180,
@@ -340,7 +332,7 @@ function buildPromptEvidence(activities: NormalizedActivity[], groups: ActivityG
       contextOnlyLimit: 5,
       includeUrls: true,
       includeMetadata: true,
-      includeCommentContext: false
+      includeCommentContext: false,
     },
     {
       actionBodyChars: 0,
@@ -349,14 +341,16 @@ function buildPromptEvidence(activities: NormalizedActivity[], groups: ActivityG
       contextOnlyLimit: 0,
       includeUrls: false,
       includeMetadata: false,
-      includeCommentContext: false
-    }
+      includeCommentContext: false,
+    },
   ];
 
   for (const options of attempts) {
     const evidenceJson = JSON.stringify(
       {
-        requiredIssueKeys: groups.map((group) => group.issueKey).filter((issueKey) => issueKey !== "Unlinked"),
+        requiredIssueKeys: groups
+          .map((group) => group.issueKey)
+          .filter((issueKey) => issueKey !== "Unlinked"),
         groupedUserActions: groups.map((group) => ({
           issueKey: group.issueKey,
           title: group.title,
@@ -364,20 +358,23 @@ function buildPromptEvidence(activities: NormalizedActivity[], groups: ActivityG
             promptActivity(activity, {
               bodyChars: options.actionBodyChars,
               includeUrls: options.includeUrls,
-              includeMetadata: options.includeMetadata
-            })
+              includeMetadata: options.includeMetadata,
+            }),
           ),
           ...(options.includeCommentContext
             ? {
-                commentContext: commentContextForGroup(activities, group.activities).map((activity) =>
+                commentContext: commentContextForGroup(
+                  activities,
+                  group.activities,
+                ).map((activity) =>
                   promptActivity(activity, {
                     bodyChars: options.contextBodyChars,
                     includeUrls: options.includeUrls,
-                    includeMetadata: false
-                  })
-                )
+                    includeMetadata: false,
+                  }),
+                ),
               }
-            : {})
+            : {}),
         })),
         contextOnly: reportEvidence.contextOnly
           .filter((activity) => activity.kind !== "comment_context")
@@ -386,16 +383,18 @@ function buildPromptEvidence(activities: NormalizedActivity[], groups: ActivityG
             promptEvidenceContext(activity, {
               bodyChars: options.contextOnlyBodyChars,
               includeUrls: options.includeUrls,
-              includeMetadata: options.includeMetadata
-            })
-          )
+              includeMetadata: options.includeMetadata,
+            }),
+          ),
       },
       null,
-      2
+      2,
     );
 
     if (evidenceJson.length <= maxChars || options === attempts.at(-1)) {
-      return evidenceJson.length <= maxChars ? evidenceJson : truncate(evidenceJson, maxChars);
+      return evidenceJson.length <= maxChars
+        ? evidenceJson
+        : truncate(evidenceJson, maxChars);
     }
   }
 
@@ -408,20 +407,27 @@ function promptActivity(
     bodyChars: number;
     includeUrls: boolean;
     includeMetadata: boolean;
-  }
+  },
 ): Record<string, unknown> {
-  return compactRecord({
-    source: activity.source,
-    kind: activity.kind,
-    issueKey: activity.issueKey,
-    title: truncateInline(activity.title, 180),
-    repository: activity.repository,
-    body: options.bodyChars > 0 && activity.body ? truncateInline(activity.body, options.bodyChars) : undefined,
-    url: options.includeUrls ? activity.url : undefined,
-    createdAt: activity.createdAt,
-    updatedAt: activity.updatedAt,
-    metadata: options.includeMetadata ? promptMetadata(activity.metadata) : undefined
-  }) ?? {};
+  return (
+    compactRecord({
+      source: activity.source,
+      kind: activity.kind,
+      issueKey: activity.issueKey,
+      title: truncateInline(activity.title, 180),
+      repository: activity.repository,
+      body:
+        options.bodyChars > 0 && activity.body
+          ? truncateInline(activity.body, options.bodyChars)
+          : undefined,
+      url: options.includeUrls ? activity.url : undefined,
+      createdAt: activity.createdAt,
+      updatedAt: activity.updatedAt,
+      metadata: options.includeMetadata
+        ? promptMetadata(activity.metadata)
+        : undefined,
+    }) ?? {}
+  );
 }
 
 function promptEvidenceContext(
@@ -430,23 +436,32 @@ function promptEvidenceContext(
     bodyChars: number;
     includeUrls: boolean;
     includeMetadata: boolean;
-  }
+  },
 ): Record<string, unknown> {
-  return compactRecord({
-    source: activity.source,
-    kind: activity.kind,
-    issueKey: activity.issueKey,
-    title: truncateInline(activity.title, 180),
-    repository: activity.repository,
-    body: options.bodyChars > 0 && activity.body ? truncateInline(activity.body, options.bodyChars) : undefined,
-    url: options.includeUrls ? activity.url : undefined,
-    createdAt: activity.createdAt,
-    updatedAt: activity.updatedAt,
-    metadata: options.includeMetadata ? promptMetadata(activity.metadata) : undefined
-  }) ?? {};
+  return (
+    compactRecord({
+      source: activity.source,
+      kind: activity.kind,
+      issueKey: activity.issueKey,
+      title: truncateInline(activity.title, 180),
+      repository: activity.repository,
+      body:
+        options.bodyChars > 0 && activity.body
+          ? truncateInline(activity.body, options.bodyChars)
+          : undefined,
+      url: options.includeUrls ? activity.url : undefined,
+      createdAt: activity.createdAt,
+      updatedAt: activity.updatedAt,
+      metadata: options.includeMetadata
+        ? promptMetadata(activity.metadata)
+        : undefined,
+    }) ?? {}
+  );
 }
 
-function promptMetadata(metadata: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
+function promptMetadata(
+  metadata: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined {
   if (!metadata) {
     return undefined;
   }
@@ -467,11 +482,13 @@ function promptMetadata(metadata: Record<string, unknown> | undefined): Record<s
     milestone: metadata.milestone,
     startDate: metadata.startDate,
     dueDate: metadata.dueDate,
-    assignee: metadata.assignee
+    assignee: metadata.assignee,
   });
 }
 
-function compactRecord(record: Record<string, unknown>): Record<string, unknown> | undefined {
+function compactRecord(
+  record: Record<string, unknown>,
+): Record<string, unknown> | undefined {
   const compacted = Object.fromEntries(
     Object.entries(record).filter(([, value]) => {
       if (value === undefined) {
@@ -482,12 +499,17 @@ function compactRecord(record: Record<string, unknown>): Record<string, unknown>
         return false;
       }
 
-      if (typeof value === "object" && value !== null && !Array.isArray(value) && Object.keys(value).length === 0) {
+      if (
+        typeof value === "object" &&
+        value !== null &&
+        !Array.isArray(value) &&
+        Object.keys(value).length === 0
+      ) {
         return false;
       }
 
       return true;
-    })
+    }),
   );
 
   return Object.keys(compacted).length > 0 ? compacted : undefined;

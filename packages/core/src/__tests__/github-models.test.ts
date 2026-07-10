@@ -28,7 +28,7 @@ afterEach(() => {
 });
 
 describe("refineWithGitHubModels", () => {
-  it("rejects incomplete model responses so callers can fall back to the template", async () => {
+  it("rejects incomplete model responses", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () =>
@@ -163,8 +163,36 @@ describe("refineWithGitHubModels", () => {
           },
         ],
       }),
-    ).rejects.toThrow(
-      "GitHub Models omitted required issue groups: GAIATASK-1357.",
+    ).rejects.toThrow("LLM omitted required issue groups: GAIATASK-1357.");
+  });
+
+  it("instructs the model to paraphrase issue summaries without quoting activity text", async () => {
+    const fetchMock = vi.fn(
+      async (_input: string | URL | Request, _init?: RequestInit) =>
+        jsonResponse({
+          choices: [
+            {
+              finish_reason: "stop",
+              message: {
+                content: "# 日報\n\n- complete",
+              },
+            },
+          ],
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await refineWithGitHubModels({
+      config: baseConfig,
+      templateDraft: "# 日報\n\n- template",
+      activities: [],
+      groups: [],
+    });
+
+    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    expect(body.messages[0].content).toContain("原文を「」で引用・列挙しない");
+    expect(body.messages[0].content).toContain(
+      "要約文では同じ文言を繰り返さず、対応内容と結果をまとめる",
     );
   });
 });
