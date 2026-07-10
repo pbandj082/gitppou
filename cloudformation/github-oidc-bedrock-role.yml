@@ -36,7 +36,14 @@ Parameters:
   BedrockModelId:
     Type: String
     Default: jp.amazon.nova-2-lite-v1:0
-    Description: Foundation model ID or inference profile ID. It must match llm.model in gitppou.yml.
+    Description: Inference profile ID or model ID. It must match llm.model in gitppou.yml.
+
+  BedrockFoundationModelId:
+    Type: String
+    Default: amazon.nova-2-lite-v1:0
+    Description: >-
+      Foundation model ID invoked by Bedrock. For an inference profile, use its
+      underlying foundation model ID instead of the profile ID.
 
 Conditions:
   CreateOidcProvider: !Equals [!Ref CreateGitHubOidcProvider, "true"]
@@ -84,7 +91,7 @@ Resources:
                 Effect: Allow
                 Action: bedrock:InvokeModel
                 Resource:
-                  - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/${BedrockModelId}"
+                  - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/${BedrockFoundationModelId}"
                   - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/${BedrockModelId}"
 
 Outputs:

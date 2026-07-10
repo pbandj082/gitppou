@@ -46,13 +46,15 @@ For GitHub Actions, use OIDC to assume an IAM role with short-lived credentials 
 
 In the CloudFormation console, choose **Create stack**, select **With new resources (standard)**, then select **Upload a template file** and upload `cloudformation/github-oidc-bedrock-role.yml`. CloudFormation requires acknowledgement that the stack creates IAM resources.
 
-Before creating the stack:
+Before creating or updating the stack:
 
 1. Set `GitHubRepository`, `GitHubBranch`, and `BedrockModelId` to the values used by your workflow and `gitppou.yml`.
-2. Set `CreateGitHubOidcProvider` to `false` if the GitHub OIDC provider already exists in this AWS account. The provider is account-wide and can be shared by multiple roles.
-3. To restrict access through a GitHub Environment instead of a branch, set `GitHubEnvironment` and add the same environment to the workflow job.
+2. Set `BedrockFoundationModelId` to the underlying foundation model. The defaults pair `jp.amazon.nova-2-lite-v1:0` with `amazon.nova-2-lite-v1:0`.
+   The template permits that foundation model in every AWS Region so a cross-Region inference profile can use its configured destination Regions. It does not grant access to other models.
+3. Set `CreateGitHubOidcProvider` to `false` if the GitHub OIDC provider already exists in this AWS account. The provider is account-wide and can be shared by multiple roles.
+4. To restrict access through a GitHub Environment instead of a branch, set `GitHubEnvironment` and add the same environment to the workflow job.
 
-The template grants only `bedrock:InvokeModel` for the selected foundation model ID or inference profile ID. For model and inference-profile ARN formats, see the AWS [Bedrock IAM policy examples](https://docs.aws.amazon.com/bedrock/latest/userguide/security_iam_id-based-policy-examples.html).
+The template grants only `bedrock:InvokeModel` for the selected foundation model and the inference profile in the stack Region. For model and inference-profile ARN formats, see the AWS [Bedrock IAM policy examples](https://docs.aws.amazon.com/bedrock/latest/userguide/security_iam_id-based-policy-examples.html).
 
 ### Configure the Workflow
 
