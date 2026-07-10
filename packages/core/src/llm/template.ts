@@ -31,6 +31,7 @@ type ProgressDateRange = {
 };
 
 const MERMAID_GANTT_WINDOW_DAYS = 14;
+const COMMENT_QUOTE_MAX_CHARS = 120;
 
 const LABELS: Record<GitppouConfig["reportLanguage"], Labels> = {
   en: {
@@ -576,7 +577,8 @@ function issueSourceSummary(
     return undefined;
   }
 
-  const topics = issueSummaryTopics(sourceActivities, issueKey, language);
+  const topics =
+    source === "backlog" ? issueSummaryTopics(sourceActivities, issueKey, language) : [];
   const sourceLabel = source === "github" ? "GitHub" : "Backlog";
 
   if (language === "ja") {
@@ -757,11 +759,7 @@ function progressLines(
   groups: ActivityGroup[],
   config: GitppouConfig
 ): string[] {
-  const assignedIssues = assignedProgressActivities(
-    activities,
-    config.reportDate,
-    mermaidGanttDateRange(config.reportDate)
-  );
+  const assignedIssues = mermaidAssignedProgressActivities(activities, config.reportDate);
   if (assignedIssues.length > 0) {
     return assignedProgressLines(assignedIssues, config);
   }
@@ -789,18 +787,34 @@ function progressLines(
 
 function assignedProgressActivities(
   activities: NormalizedActivity[],
-  reportDate?: string,
-  dateRange?: ProgressDateRange
+  reportDate?: string
 ): NormalizedActivity[] {
   return activities
     .filter((activity) => activity.kind === "assigned_issue")
     .filter((activity) => progressSchedule(activity, reportDate) !== undefined)
-    .filter((activity) => {
-      const range = progressDateRange(activity, reportDate);
-      return !dateRange || Boolean(range && progressDateRangesOverlap(range, dateRange));
-    })
     .sort((left, right) => compareProgressStartDate(left, right, reportDate))
     .slice(0, 10);
+}
+
+function mermaidAssignedProgressActivities(
+  activities: NormalizedActivity[],
+  reportDate: string
+): NormalizedActivity[] {
+  const dateRange = mermaidGanttDateRange(reportDate);
+  return activities
+    .filter((activity) => activity.kind === "assigned_issue")
+    .filter((activity) => progressSchedule(activity, reportDate) !== undefined)
+    .filter((activity) => progressStartsOrEndsWithinRange(activity, dateRange))
+    .sort((left, right) => compareProgressStartDate(left, right, reportDate));
+}
+
+function progressStartsOrEndsWithinRange(
+  activity: NormalizedActivity,
+  dateRange: ProgressDateRange
+): boolean {
+  return [metadataDate(activity, "startDate"), metadataDate(activity, "dueDate")].some(
+    (date) => Boolean(date && dateRange.start <= date && date <= dateRange.due)
+  );
 }
 
 function compareProgressStartDate(
@@ -1195,8 +1209,10 @@ function compactBody(body: string | undefined): string | undefined {
     return undefined;
   }
 
-  const compact = stripMarkdownBreaks(body).slice(0, 180);
-  return compact.length < body.length ? `${compact}...` : compact;
+  const compact = stripMarkdownBreaks(body);
+  return compact.length > COMMENT_QUOTE_MAX_CHARS
+    ? `${compact.slice(0, COMMENT_QUOTE_MAX_CHARS)}...`
+    : compact;
 }
 
 function isConfirmationComment(value: string): boolean {

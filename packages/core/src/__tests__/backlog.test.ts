@@ -202,6 +202,133 @@ describe("fetchBacklogActivities", () => {
     );
   });
 
+  it("fetches every assigned issue starting or due within two weeks of the report date", async () => {
+    const urls: URL[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        const url = new URL(String(input));
+        urls.push(url);
+
+        if (url.pathname === "/api/v2/users/myself") {
+          return jsonResponse({
+            id: 123,
+            name: "Admin",
+          });
+        }
+
+        if (url.pathname === "/api/v2/projects") {
+          return jsonResponse([
+            {
+              id: 456,
+              projectKey: "APP",
+              name: "App",
+            },
+          ]);
+        }
+
+        if (url.pathname === "/api/v2/issues") {
+          if (url.searchParams.has("startDateSince")) {
+            if (url.searchParams.get("offset") === "0") {
+              return jsonResponse(
+                Array.from({ length: 100 }, (_, index) => ({
+                  id: index + 1,
+                  issueKey: `APP-${index + 1}`,
+                  summary: "Starting soon",
+                  startDate: "2026-07-20",
+                  dueDate: "2026-08-01",
+                  assignee: {
+                    id: 123,
+                    name: "Admin",
+                  },
+                })),
+              );
+            }
+
+            return jsonResponse([
+              {
+                id: 101,
+                issueKey: "APP-101",
+                summary: "Starting soon",
+                startDate: "2026-07-20",
+                dueDate: "2026-08-01",
+                assignee: {
+                  id: 123,
+                  name: "Admin",
+                },
+              },
+            ]);
+          }
+
+          if (url.searchParams.has("dueDateSince")) {
+            return jsonResponse([
+              {
+                id: 102,
+                issueKey: "APP-102",
+                summary: "Due soon",
+                startDate: "2026-05-01",
+                dueDate: "2026-06-22",
+                assignee: {
+                  id: 123,
+                  name: "Admin",
+                },
+              },
+            ]);
+          }
+
+          return jsonResponse([]);
+        }
+
+        return jsonResponse({}, 404);
+      }),
+    );
+
+    const activities = await fetchBacklogActivities(baseConfig);
+
+    expect(activities).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "assigned_issue",
+          issueKey: "APP-1",
+        }),
+        expect.objectContaining({
+          kind: "assigned_issue",
+          issueKey: "APP-101",
+        }),
+        expect.objectContaining({
+          kind: "assigned_issue",
+          issueKey: "APP-102",
+        }),
+      ]),
+    );
+    expect(
+      urls.some(
+        (url) =>
+          url.pathname === "/api/v2/issues" &&
+          url.searchParams.get("startDateSince") === "2026-06-22" &&
+          url.searchParams.get("startDateUntil") === "2026-07-20" &&
+          url.searchParams.get("count") === "100",
+      ),
+    ).toBe(true);
+    expect(
+      urls.some(
+        (url) =>
+          url.pathname === "/api/v2/issues" &&
+          url.searchParams.has("startDateSince") &&
+          url.searchParams.get("offset") === "100",
+      ),
+    ).toBe(true);
+    expect(
+      urls.some(
+        (url) =>
+          url.pathname === "/api/v2/issues" &&
+          url.searchParams.get("dueDateSince") === "2026-06-22" &&
+          url.searchParams.get("dueDateUntil") === "2026-07-20" &&
+          url.searchParams.get("count") === "100",
+      ),
+    ).toBe(true);
+  });
+
   it("keeps issues updated on the report date and due today", async () => {
     vi.stubGlobal(
       "fetch",

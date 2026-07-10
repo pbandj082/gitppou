@@ -194,6 +194,9 @@ describe("refineWithGitHubModels", () => {
     expect(body.messages[0].content).toContain(
       "要約文では同じ文言を繰り返さず、対応内容と結果をまとめる",
     );
+    expect(body.messages[0].content).toContain(
+      "GitHubのcommitメッセージやPRタイトルは要約文にそのまま書かず",
+    );
   });
 });
 

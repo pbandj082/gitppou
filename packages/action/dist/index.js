@@ -61292,7 +61292,8 @@ function isObject(value) {
 
 ;// CONCATENATED MODULE: ../core/dist/backlog.js
 
-const ASSIGNED_PROGRESS_FETCH_LIMIT = 50;
+const BACKLOG_ISSUE_PAGE_SIZE = 100;
+const ASSIGNED_PROGRESS_WINDOW_DAYS = 14;
 const COMMENT_CONTEXT_LIMIT = 8;
 const COMMENT_CONTEXT_BODY_LIMIT = 300;
 async function fetchBacklogActivities(config) {
@@ -61448,7 +61449,6 @@ async function fetchAssignedProgressIssues(config, projectIds) {
         return [];
     }
     const params = {
-        count: ASSIGNED_PROGRESS_FETCH_LIMIT,
         sort: "updated",
         order: "desc",
         "assigneeId[]": [config.backlogUserId],
@@ -61456,7 +61456,44 @@ async function fetchAssignedProgressIssues(config, projectIds) {
     if (projectIds.length > 0) {
         params["projectId[]"] = projectIds;
     }
-    return backlogGet(config, "/issues", params);
+    const dateRange = assignedProgressDateRange(config.reportDate);
+    const [startedNearby, dueNearby] = await Promise.all([
+        fetchAllBacklogIssues(config, {
+            ...params,
+            startDateSince: dateRange.start,
+            startDateUntil: dateRange.due,
+        }),
+        fetchAllBacklogIssues(config, {
+            ...params,
+            dueDateSince: dateRange.start,
+            dueDateUntil: dateRange.due,
+        }),
+    ]);
+    const issues = new Map();
+    for (const issue of [...startedNearby, ...dueNearby]) {
+        issues.set(issue.issueKey, issue);
+    }
+    return [...issues.values()];
+}
+async function fetchAllBacklogIssues(config, params) {
+    const issues = [];
+    for (let offset = 0;; offset += BACKLOG_ISSUE_PAGE_SIZE) {
+        const page = await backlogGet(config, "/issues", {
+            ...params,
+            count: BACKLOG_ISSUE_PAGE_SIZE,
+            offset,
+        });
+        issues.push(...page);
+        if (page.length < BACKLOG_ISSUE_PAGE_SIZE) {
+            return issues;
+        }
+    }
+}
+function assignedProgressDateRange(reportDate) {
+    return {
+        start: backlog_addDays(reportDate, -ASSIGNED_PROGRESS_WINDOW_DAYS),
+        due: backlog_addDays(reportDate, ASSIGNED_PROGRESS_WINDOW_DAYS),
+    };
 }
 async function fetchIssueComments(config, issueKey) {
     return backlogGet(config, `/issues/${encodeURIComponent(issueKey)}/comments`, {
@@ -61750,6 +61787,11 @@ function namesOf(values) {
 }
 function dateOnly(value) {
     return value?.match(/^\d{4}-\d{2}-\d{2}/)?.[0];
+}
+function backlog_addDays(date, days) {
+    const parsed = new Date(`${date}T00:00:00Z`);
+    parsed.setUTCDate(parsed.getUTCDate() + days);
+    return parsed.toISOString().slice(0, 10);
 }
 function isResolvedBacklogStatus(status) {
     return /done|closed|resolved|completed|処理済み|完了|対応済み|終了|クローズ/i.test(status);
@@ -66260,15 +66302,24 @@ async function fetchCommitPullRequestContext(octokit, repo, sha) {
             per_page: 100
         });
         const pullRequest = pullRequests.find((pull) => pull.head?.ref) ?? pullRequests[0];
-        if (!pullRequest) {
-            return undefined;
+        if (pullRequest) {
+            return {
+                ...(pullRequest.head?.ref ? { branch: pullRequest.head.ref } : {}),
+                pullRequestNumber: pullRequest.number,
+                pullRequestTitle: pullRequest.title,
+                pullRequestUrl: pullRequest.html_url
+            };
         }
-        return {
-            ...(pullRequest.head?.ref ? { branch: pullRequest.head.ref } : {}),
-            pullRequestNumber: pullRequest.number,
-            pullRequestTitle: pullRequest.title,
-            pullRequestUrl: pullRequest.html_url
-        };
+    }
+    catch { }
+    try {
+        const { data: branches } = await octokit.repos.listBranchesForHeadCommit({
+            owner: repo.owner,
+            repo: repo.repo,
+            commit_sha: sha
+        });
+        const branch = branches.find((candidate) => /[A-Z][A-Z0-9_]+-\d+/.test(candidate.name)) ?? branches[0];
+        return branch ? { branch: branch.name } : undefined;
     }
     catch {
         return undefined;
@@ -67056,6 +67107,7 @@ function countChar(value, char) {
 
 
 const MERMAID_GANTT_WINDOW_DAYS = 14;
+const COMMENT_QUOTE_MAX_CHARS = 120;
 const LABELS = {
     en: {
         title: "Daily Report",
@@ -67473,7 +67525,7 @@ function issueSourceSummary(activities, source, issueKey, language) {
     if (terms.length === 0) {
         return undefined;
     }
-    const topics = issueSummaryTopics(sourceActivities, issueKey, language);
+    const topics = source === "backlog" ? issueSummaryTopics(sourceActivities, issueKey, language) : [];
     const sourceLabel = source === "github" ? "GitHub" : "Backlog";
     if (language === "ja") {
         const topicPrefix = topics.length > 0 ? `${quoteTopics(topics, language)}を中心に` : "";
@@ -67602,7 +67654,7 @@ function joinEnglishTerms(values) {
     return `${values.slice(0, -1).join(", ")}, and ${values[values.length - 1]}`;
 }
 function progressLines(activities, groups, config) {
-    const assignedIssues = assignedProgressActivities(activities, config.reportDate, mermaidGanttDateRange(config.reportDate));
+    const assignedIssues = mermaidAssignedProgressActivities(activities, config.reportDate);
     if (assignedIssues.length > 0) {
         return assignedProgressLines(assignedIssues, config);
     }
@@ -67623,16 +67675,23 @@ function progressLines(activities, groups, config) {
         return `- ${prefix}: ${statusText}; ${githubCount} GitHub item(s), ${backlogCount} Backlog item(s).`;
     });
 }
-function assignedProgressActivities(activities, reportDate, dateRange) {
+function assignedProgressActivities(activities, reportDate) {
     return activities
         .filter((activity) => activity.kind === "assigned_issue")
         .filter((activity) => progressSchedule(activity, reportDate) !== undefined)
-        .filter((activity) => {
-        const range = progressDateRange(activity, reportDate);
-        return !dateRange || Boolean(range && progressDateRangesOverlap(range, dateRange));
-    })
         .sort((left, right) => compareProgressStartDate(left, right, reportDate))
         .slice(0, 10);
+}
+function mermaidAssignedProgressActivities(activities, reportDate) {
+    const dateRange = mermaidGanttDateRange(reportDate);
+    return activities
+        .filter((activity) => activity.kind === "assigned_issue")
+        .filter((activity) => progressSchedule(activity, reportDate) !== undefined)
+        .filter((activity) => progressStartsOrEndsWithinRange(activity, dateRange))
+        .sort((left, right) => compareProgressStartDate(left, right, reportDate));
+}
+function progressStartsOrEndsWithinRange(activity, dateRange) {
+    return [metadataDate(activity, "startDate"), metadataDate(activity, "dueDate")].some((date) => Boolean(date && dateRange.start <= date && date <= dateRange.due));
 }
 function compareProgressStartDate(left, right, reportDate) {
     const leftStart = progressStartDate(left, reportDate);
@@ -67928,8 +67987,10 @@ function compactBody(body) {
     if (!body) {
         return undefined;
     }
-    const compact = stripMarkdownBreaks(body).slice(0, 180);
-    return compact.length < body.length ? `${compact}...` : compact;
+    const compact = stripMarkdownBreaks(body);
+    return compact.length > COMMENT_QUOTE_MAX_CHARS
+        ? `${compact.slice(0, COMMENT_QUOTE_MAX_CHARS)}...`
+        : compact;
 }
 function isConfirmationComment(value) {
     return /確認しました|確認済み|確認いたしました|確認完了|confirmed|looks good|lgtm/i.test(stripMarkdownBreaks(value));
@@ -68154,6 +68215,7 @@ function buildPrompt(input) {
 - 各課題見出しの下では、メタ情報の後、アクティビティ箇条書きの前に1文の自然文要約を置く
 - 要約文はcommitメッセージ、PRタイトル、Backlogコメント本文、直前コメント文脈から「何について対応したか」を具体化し、activity種別だけの説明で終わらせない
 - 要約文ではcommitメッセージ、PRタイトル、コメント本文の内容を解釈して自然に言い換え、原文を「」で引用・列挙しない
+- GitHubのcommitメッセージやPRタイトルは要約文にそのまま書かず、鍵カッコ・引用符を含めて転載しない。複数の変更は、実装した機能、改善した対象、得られた結果を自然な1文に統合する
 - 原文は後続のアクティビティ一覧で確認できるため、要約文では同じ文言を繰り返さず、対応内容と結果をまとめる
 - URLは必ずMarkdownリンク（例: [リンク](https://example.com)）として出力し、生URLのまま書かない
 - 「userActions」にある当日ユーザー本人の行動だけを「本日対応したこと」に書く
@@ -68199,6 +68261,7 @@ Rules:
 - Under each issue heading, keep a one-sentence natural-language summary after metadata and before activity bullets.
 - Make each summary concrete by using commit messages, PR titles, Backlog comment bodies, and previous-comment context; do not summarize only by activity type.
 - In each summary, interpret and paraphrase commit messages, PR titles, and comment bodies; do not quote or enumerate their original wording.
+- Never reproduce GitHub commit messages or PR titles in a summary, including inside quotation marks. Combine related changes into natural prose that states the implemented capability, improved area, and outcome.
 - The original wording remains visible in the activity list, so summarize the work and outcome without repeating it in the summary.
 - Always render URLs as Markdown links such as [link](https://example.com); do not emit raw URLs.
 - Write "Work completed today" only from entries in "userActions".

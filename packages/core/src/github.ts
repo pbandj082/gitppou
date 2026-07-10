@@ -342,16 +342,26 @@ async function fetchCommitPullRequestContext(
       per_page: 100
     });
     const pullRequest = pullRequests.find((pull) => pull.head?.ref) ?? pullRequests[0];
-    if (!pullRequest) {
-      return undefined;
+    if (pullRequest) {
+      return {
+        ...(pullRequest.head?.ref ? { branch: pullRequest.head.ref } : {}),
+        pullRequestNumber: pullRequest.number,
+        pullRequestTitle: pullRequest.title,
+        pullRequestUrl: pullRequest.html_url
+      };
     }
+  } catch {}
 
-    return {
-      ...(pullRequest.head?.ref ? { branch: pullRequest.head.ref } : {}),
-      pullRequestNumber: pullRequest.number,
-      pullRequestTitle: pullRequest.title,
-      pullRequestUrl: pullRequest.html_url
-    };
+  try {
+    const { data: branches } = await octokit.repos.listBranchesForHeadCommit({
+      owner: repo.owner,
+      repo: repo.repo,
+      commit_sha: sha
+    });
+    const branch =
+      branches.find((candidate) => /[A-Z][A-Z0-9_]+-\d+/.test(candidate.name)) ?? branches[0];
+
+    return branch ? { branch: branch.name } : undefined;
   } catch {
     return undefined;
   }
