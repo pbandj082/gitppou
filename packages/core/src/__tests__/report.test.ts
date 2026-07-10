@@ -324,11 +324,12 @@ describe("report helpers", () => {
       [
         "**種別:** Task / **カテゴリー:** Backend",
         "",
-        "この課題では、GitHubで「Update login flow」を中心にPR更新、Backlogで「確認しました」と「ステータスを確認依頼から処理済みへ変更」を中心にコメント対応とステータス変更を行いました。",
+        "この課題では、GitHubでPR更新、Backlogで「確認しました」と「ステータスを確認依頼から処理済みへ変更」を中心にコメント対応とステータス変更を行いました。",
         "",
         "- PRを更新: APP-1 Update login flow",
       ].join("\n"),
     );
+    expect(markdown).not.toContain("「Update login flow」");
   });
 
   it("describes Backlog status changes explicitly in Japanese", () => {
@@ -605,6 +606,34 @@ describe("report helpers", () => {
     expect(markdown).not.toContain("https://github.com/owner/repo/pull/1。");
   });
 
+  it("truncates long quoted comments with an ellipsis", () => {
+    const longComment = "あ".repeat(121);
+    const activity: NormalizedActivity = {
+      source: "backlog",
+      kind: "comment",
+      issueKey: "APP-1",
+      title: "APP-1 Updated issue",
+      body: longComment,
+    };
+    const markdown = generateTemplateReport({
+      config: {
+        ...baseConfig,
+        reportLanguage: "ja",
+      },
+      activities: [activity],
+      groups: [
+        {
+          issueKey: "APP-1",
+          title: "Updated issue",
+          activities: [activity],
+        },
+      ],
+    });
+
+    expect(markdown).toContain(`  > ${"あ".repeat(120)}...`);
+    expect(markdown).not.toContain(longComment);
+  });
+
   it("renders pull request diff stats", () => {
     const activity: NormalizedActivity = {
       source: "github",
@@ -769,7 +798,7 @@ describe("report helpers", () => {
     expect(markdown).not.toContain("- APP-1: ステータス:");
   });
 
-  it("limits Mermaid gantt tasks to two weeks before and after the report date", () => {
+  it("shows every assigned issue starting or due within two weeks in Mermaid gantt", () => {
     const activities: NormalizedActivity[] = [
       {
         source: "backlog",
@@ -810,7 +839,27 @@ describe("report helpers", () => {
           startDate: "2026-07-21",
           dueDate: "2026-08-01"
         }
-      }
+      },
+      {
+        source: "backlog",
+        kind: "assigned_issue",
+        issueKey: "APP-5",
+        title: "APP-5 Issue spanning the whole visible range",
+        metadata: {
+          startDate: "2026-05-01",
+          dueDate: "2026-08-31"
+        }
+      },
+      ...Array.from({ length: 11 }, (_, index) => ({
+        source: "backlog" as const,
+        kind: "assigned_issue" as const,
+        issueKey: `APP-${index + 6}`,
+        title: `APP-${index + 6} Nearby assigned issue`,
+        metadata: {
+          startDate: "2026-07-10",
+          dueDate: "2026-07-11"
+        }
+      }))
     ];
     const markdown = generateTemplateReport({
       config: baseConfig,
@@ -821,7 +870,9 @@ describe("report helpers", () => {
 
     expect(gantt).toContain("APP-1 Ongoing issue :task_APP_1, 2026-06-22, 2026-07-01");
     expect(gantt).toContain("APP-2 Long-running issue :task_APP_2, 2026-07-05, 2026-07-20");
+    expect(gantt).toContain("APP-16 Nearby assigned issue :task_APP_16, 2026-07-10, 2026-07-11");
     expect(gantt).not.toContain("APP-3 Past issue");
     expect(gantt).not.toContain("APP-4 Future issue");
+    expect(gantt).not.toContain("APP-5 Issue spanning the whole visible range");
   });
 });

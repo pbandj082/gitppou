@@ -101,6 +101,7 @@ function buildPrompt(input: {
 - 各課題見出しの下では、メタ情報の後、アクティビティ箇条書きの前に1文の自然文要約を置く
 - 要約文はcommitメッセージ、PRタイトル、Backlogコメント本文、直前コメント文脈から「何について対応したか」を具体化し、activity種別だけの説明で終わらせない
 - 要約文ではcommitメッセージ、PRタイトル、コメント本文の内容を解釈して自然に言い換え、原文を「」で引用・列挙しない
+- GitHubのcommitメッセージやPRタイトルは要約文にそのまま書かず、鍵カッコ・引用符を含めて転載しない。複数の変更は、実装した機能、改善した対象、得られた結果を自然な1文に統合する
 - 原文は後続のアクティビティ一覧で確認できるため、要約文では同じ文言を繰り返さず、対応内容と結果をまとめる
 - URLは必ずMarkdownリンク（例: [リンク](https://example.com)）として出力し、生URLのまま書かない
 - 「userActions」にある当日ユーザー本人の行動だけを「本日対応したこと」に書く
@@ -147,6 +148,7 @@ Rules:
 - Under each issue heading, keep a one-sentence natural-language summary after metadata and before activity bullets.
 - Make each summary concrete by using commit messages, PR titles, Backlog comment bodies, and previous-comment context; do not summarize only by activity type.
 - In each summary, interpret and paraphrase commit messages, PR titles, and comment bodies; do not quote or enumerate their original wording.
+- Never reproduce GitHub commit messages or PR titles in a summary, including inside quotation marks. Combine related changes into natural prose that states the implemented capability, improved area, and outcome.
 - The original wording remains visible in the activity list, so summarize the work and outcome without repeating it in the summary.
 - Always render URLs as Markdown links such as [link](https://example.com); do not emit raw URLs.
 - Write "Work completed today" only from entries in "userActions".

@@ -352,6 +352,76 @@ describe("fetchGitHubActivities", () => {
       }),
     ]);
   });
+
+  it("includes issue-key branch context for a commit at a branch head", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        const url = new URL(String(input));
+
+        if (url.pathname === "/repos/owner/repo/commits") {
+          return jsonResponse([
+            {
+              sha: "abc123456789",
+              html_url: "https://github.com/owner/repo/commit/abc123456789",
+              commit: {
+                message: "refine report output",
+                author: {
+                  date: "2026-07-06T10:00:00Z",
+                },
+              },
+            },
+          ]);
+        }
+
+        if (url.pathname === "/repos/owner/repo/commits/abc123456789/pulls") {
+          return jsonResponse([]);
+        }
+
+        if (
+          url.pathname ===
+          "/repos/owner/repo/commits/abc123456789/branches-where-head"
+        ) {
+          return jsonResponse([
+            {
+              name: "main",
+            },
+            {
+              name: "feature/APP-1-login",
+            },
+          ]);
+        }
+
+        if (url.pathname === "/repos/owner/repo/issues/comments") {
+          return jsonResponse([]);
+        }
+
+        if (url.pathname === "/search/issues") {
+          return jsonResponse({
+            total_count: 0,
+            incomplete_results: false,
+            items: [],
+          });
+        }
+
+        return jsonResponse({}, 404);
+      }),
+    );
+
+    await expect(
+      fetchGitHubActivities({
+        ...baseConfig,
+        githubRepos: ["owner/repo"],
+      }),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        kind: "commit",
+        metadata: expect.objectContaining({
+          branch: "feature/APP-1-login",
+        }),
+      }),
+    ]);
+  });
 });
 
 function jsonResponse(body: unknown, status = 200): Response {

@@ -87,7 +87,8 @@ type BacklogComment = {
 
 type QueryValue =
   string | number | boolean | readonly (string | number | boolean)[];
-const ASSIGNED_PROGRESS_FETCH_LIMIT = 50;
+const BACKLOG_ISSUE_PAGE_SIZE = 100;
+const ASSIGNED_PROGRESS_WINDOW_DAYS = 14;
 const COMMENT_CONTEXT_LIMIT = 8;
 const COMMENT_CONTEXT_BODY_LIMIT = 300;
 
@@ -340,7 +341,6 @@ async function fetchAssignedProgressIssues(
   }
 
   const params: Record<string, QueryValue> = {
-    count: ASSIGNED_PROGRESS_FETCH_LIMIT,
     sort: "updated",
     order: "desc",
     "assigneeId[]": [config.backlogUserId],
@@ -350,7 +350,53 @@ async function fetchAssignedProgressIssues(
     params["projectId[]"] = projectIds;
   }
 
-  return backlogGet<BacklogIssue[]>(config, "/issues", params);
+  const dateRange = assignedProgressDateRange(config.reportDate);
+  const [startedNearby, dueNearby] = await Promise.all([
+    fetchAllBacklogIssues(config, {
+      ...params,
+      startDateSince: dateRange.start,
+      startDateUntil: dateRange.due,
+    }),
+    fetchAllBacklogIssues(config, {
+      ...params,
+      dueDateSince: dateRange.start,
+      dueDateUntil: dateRange.due,
+    }),
+  ]);
+
+  const issues = new Map<string, BacklogIssue>();
+  for (const issue of [...startedNearby, ...dueNearby]) {
+    issues.set(issue.issueKey, issue);
+  }
+
+  return [...issues.values()];
+}
+
+async function fetchAllBacklogIssues(
+  config: BacklogRequestContext,
+  params: Record<string, QueryValue>,
+): Promise<BacklogIssue[]> {
+  const issues: BacklogIssue[] = [];
+
+  for (let offset = 0; ; offset += BACKLOG_ISSUE_PAGE_SIZE) {
+    const page = await backlogGet<BacklogIssue[]>(config, "/issues", {
+      ...params,
+      count: BACKLOG_ISSUE_PAGE_SIZE,
+      offset,
+    });
+    issues.push(...page);
+
+    if (page.length < BACKLOG_ISSUE_PAGE_SIZE) {
+      return issues;
+    }
+  }
+}
+
+function assignedProgressDateRange(reportDate: string): { start: string; due: string } {
+  return {
+    start: addDays(reportDate, -ASSIGNED_PROGRESS_WINDOW_DAYS),
+    due: addDays(reportDate, ASSIGNED_PROGRESS_WINDOW_DAYS),
+  };
 }
 
 async function fetchIssueComments(
@@ -763,6 +809,12 @@ function namesOf(
 
 function dateOnly(value: string | null | undefined): string | undefined {
   return value?.match(/^\d{4}-\d{2}-\d{2}/)?.[0];
+}
+
+function addDays(date: string, days: number): string {
+  const parsed = new Date(`${date}T00:00:00Z`);
+  parsed.setUTCDate(parsed.getUTCDate() + days);
+  return parsed.toISOString().slice(0, 10);
 }
 
 function isResolvedBacklogStatus(status: string): boolean {
