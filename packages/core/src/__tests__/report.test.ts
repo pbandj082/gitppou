@@ -768,4 +768,60 @@ describe("report helpers", () => {
     expect(markdown).not.toContain("- APP-2: ステータス:");
     expect(markdown).not.toContain("- APP-1: ステータス:");
   });
+
+  it("limits Mermaid gantt tasks to two weeks before and after the report date", () => {
+    const activities: NormalizedActivity[] = [
+      {
+        source: "backlog",
+        kind: "assigned_issue",
+        issueKey: "APP-1",
+        title: "APP-1 Ongoing issue",
+        metadata: {
+          startDate: "2026-05-01",
+          dueDate: "2026-07-01"
+        }
+      },
+      {
+        source: "backlog",
+        kind: "assigned_issue",
+        issueKey: "APP-2",
+        title: "APP-2 Long-running issue",
+        metadata: {
+          startDate: "2026-07-05",
+          dueDate: "2026-08-31"
+        }
+      },
+      {
+        source: "backlog",
+        kind: "assigned_issue",
+        issueKey: "APP-3",
+        title: "APP-3 Past issue",
+        metadata: {
+          startDate: "2026-05-01",
+          dueDate: "2026-06-21"
+        }
+      },
+      {
+        source: "backlog",
+        kind: "assigned_issue",
+        issueKey: "APP-4",
+        title: "APP-4 Future issue",
+        metadata: {
+          startDate: "2026-07-21",
+          dueDate: "2026-08-01"
+        }
+      }
+    ];
+    const markdown = generateTemplateReport({
+      config: baseConfig,
+      activities,
+      groups: []
+    });
+    const gantt = markdown.match(/```mermaid\n[\s\S]*?\n```/)?.[0] ?? "";
+
+    expect(gantt).toContain("APP-1 Ongoing issue :task_APP_1, 2026-06-22, 2026-07-01");
+    expect(gantt).toContain("APP-2 Long-running issue :task_APP_2, 2026-07-05, 2026-07-20");
+    expect(gantt).not.toContain("APP-3 Past issue");
+    expect(gantt).not.toContain("APP-4 Future issue");
+  });
 });

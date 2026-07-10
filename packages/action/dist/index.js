@@ -67055,6 +67055,7 @@ function countChar(value, char) {
 ;// CONCATENATED MODULE: ../core/dist/llm/template.js
 
 
+const MERMAID_GANTT_WINDOW_DAYS = 14;
 const LABELS = {
     en: {
         title: "Daily Report",
@@ -67601,7 +67602,7 @@ function joinEnglishTerms(values) {
     return `${values.slice(0, -1).join(", ")}, and ${values[values.length - 1]}`;
 }
 function progressLines(activities, groups, config) {
-    const assignedIssues = assignedProgressActivities(activities, config.reportDate);
+    const assignedIssues = assignedProgressActivities(activities, config.reportDate, mermaidGanttDateRange(config.reportDate));
     if (assignedIssues.length > 0) {
         return assignedProgressLines(assignedIssues, config);
     }
@@ -67622,10 +67623,14 @@ function progressLines(activities, groups, config) {
         return `- ${prefix}: ${statusText}; ${githubCount} GitHub item(s), ${backlogCount} Backlog item(s).`;
     });
 }
-function assignedProgressActivities(activities, reportDate) {
+function assignedProgressActivities(activities, reportDate, dateRange) {
     return activities
         .filter((activity) => activity.kind === "assigned_issue")
         .filter((activity) => progressSchedule(activity, reportDate) !== undefined)
+        .filter((activity) => {
+        const range = progressDateRange(activity, reportDate);
+        return !dateRange || Boolean(range && progressDateRangesOverlap(range, dateRange));
+    })
         .sort((left, right) => compareProgressStartDate(left, right, reportDate))
         .slice(0, 10);
 }
@@ -67670,7 +67675,7 @@ function mermaidTaskLine(activity, reportDate) {
     const marker = mermaidStatusMarker(metadataString(activity, "status"));
     const taskId = `task_${issueKey.replace(/[^A-Za-z0-9_]/g, "_")}`;
     const markerPrefix = marker ? `${marker}, ${taskId}` : taskId;
-    const schedule = progressSchedule(activity, reportDate) ?? `${reportDate}, 1d`;
+    const schedule = mermaidProgressSchedule(activity, reportDate) ?? `${reportDate}, 1d`;
     return `${title} :${markerPrefix}, ${schedule}`;
 }
 function mermaidTaskTitle(activity) {
@@ -67714,6 +67719,38 @@ function progressDateRange(activity, reportDate) {
         return undefined;
     }
     return { start, due };
+}
+function mermaidGanttDateRange(reportDate) {
+    return {
+        start: template_addDays(reportDate, -MERMAID_GANTT_WINDOW_DAYS),
+        due: template_addDays(reportDate, MERMAID_GANTT_WINDOW_DAYS)
+    };
+}
+function mermaidProgressSchedule(activity, reportDate) {
+    const range = progressDateRange(activity, reportDate);
+    if (!range) {
+        return undefined;
+    }
+    const visibleRange = clipProgressDateRange(range, mermaidGanttDateRange(reportDate));
+    if (!visibleRange) {
+        return undefined;
+    }
+    return progressScheduleForRange(visibleRange);
+}
+function clipProgressDateRange(range, bounds) {
+    if (!progressDateRangesOverlap(range, bounds)) {
+        return undefined;
+    }
+    return {
+        start: range.start < bounds.start ? bounds.start : range.start,
+        due: range.due > bounds.due ? bounds.due : range.due
+    };
+}
+function progressDateRangesOverlap(left, right) {
+    return left.start <= right.due && right.start <= left.due;
+}
+function progressScheduleForRange(range) {
+    return range.start === range.due ? `${range.start}, 1d` : `${range.start}, ${range.due}`;
 }
 function progressStartDate(activity, reportDate) {
     return progressDateRange(activity, reportDate)?.start ?? "9999-12-31";
